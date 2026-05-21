@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Вход</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 min-h-screen grid place-items-center">
+  <form method="post" action="/admin/login" class="bg-white border border-slate-200 rounded-lg p-6 w-full max-w-sm space-y-4 shadow-sm">
+    <h1 class="text-xl font-semibold">Вход администратора</h1>
+    {% if request.query_params.get("error") %}
+      <div class="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">Неверный логин или пароль</div>
+    {% endif %}
+    <label class="block text-sm">
+      <span class="text-slate-600">Логин</span>
+      <input name="username" class="mt-1 w-full border border-slate-300 rounded px-3 py-2">
+    </label>
+    <label class="block text-sm">
+      <span class="text-slate-600">Пароль</span>
+      <input name="password" type="password" class="mt-1 w-full border border-slate-300 rounded px-3 py-2">
+    </label>
+    <button class="w-full bg-slate-900 text-white rounded px-3 py-2">Войти</button>
+  </form>
+</body>
+</html>
+

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-6">Медкомиссии</h1>
+<div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-slate-100 text-slate-600">
+      <tr>
+        <th class="p-3 text-left">Работник</th>
+        <th class="p-3 text-left">Предыдущая дата</th>
+        <th class="p-3 text-left">Следующая дата</th>
+        <th class="p-3 text-left">Состояние</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr class="border-t border-slate-100">
+        <td class="p-3"><a class="font-medium hover:text-blue-700" href="/admin/employees/{{ row.employee.id }}">{{ row.employee.full_name }}</a></td>
+        <td class="p-3">{{ row.previous_date or "" }}</td>
+        <td class="p-3"><span class="border rounded px-2 py-1 {{ row.next_date|date_badge_class }}">{{ row.next_date }}</span></td>
+        <td class="p-3">{{ row.next_date|date_state_label }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="p-3 text-slate-500">Нет данных</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+

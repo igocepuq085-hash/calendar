@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title or "КИП календарь" }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  {% set path = request.url.path %}
+
+  <header class="mobile-header">
+    <button type="button" class="mobile-menu-button" onclick="document.getElementById('mobile-more-menu').classList.toggle('is-open')" aria-label="Открыть меню">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <a href="/admin" class="mobile-brand">КИП календарь</a>
+    <a href="/admin/import-errors" class="mobile-icon-button" aria-label="Ошибки импорта">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 7h18s-3 0-3-7"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+    </a>
+  </header>
+
+  <div id="mobile-more-menu" class="mobile-more-menu">
+    <a href="/admin/work-shifts">График смен</a>
+    <a href="/admin/uploads">Загрузка файлов</a>
+    <a href="/admin/knowledge">Проверка знаний</a>
+    <a href="/admin/medical">Медкомиссии</a>
+    <a href="/admin/import-errors">Ошибки импорта</a>
+    <form method="post" action="/admin/logout"><button>Выйти</button></form>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 2v4M16 2v4M3 10h18"/><path d="M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="m9 15 2 2 4-5"/></svg>
+      </div>
+      <div>
+        <div class="brand-title">КИП календарь</div>
+        <div class="brand-subtitle">Панель администратора</div>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <a class="sidebar-link {{ 'is-active' if path == '/admin' else '' }}" href="/admin">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+        <span>Главная</span>
+      </a>
+      <a class="sidebar-link {{ 'is-active' if path.startswith('/admin/employees') else '' }}" href="/admin/employees">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>Работники</span>
+      </a>
+      <a class="sidebar-link {{ 'is-active' if path.startswith('/admin/work-shifts') else '' }}" href="/admin/work-shifts">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg>
+        <span>График смен</span>
+      </a>
+      <a class="sidebar-link {{ 'is-active' if path.startswith('/admin/kip') else '' }}" href="/admin/kip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-5"/></svg>
+        <span>КИП</span>
+      </a>
+      <a class="sidebar-link {{ 'is-active' if path.startswith('/admin/knowledge') else '' }}" href="/admin/knowledge">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M4 4v15.5"/><path d="M8 4h11a1 1 0 0 1 1 1v16H8a4 4 0 0 1-4-4V8a4 4 0 0 1 4-4Z"/></svg>
+        <span>Проверка знаний</span>
+      </a>
+      <a class="sidebar-link {{ 'is-active' if path.startswith('/admin/medical') else '' }}" href="/admin/medical">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 2v4M16 2v4"/><rect x="4" y="4" width="16" height="18" rx="2"/><path d="M12 10v6M9 13h6"/></svg>
+        <span>Медкомиссии</span>
+      </a>
+      <a class="sidebar-link {{ 'is-active' if path.startswith('/admin/uploads') else '' }}" href="/admin/uploads">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></svg>
+        <span>Загрузка файлов</span>
+      </a>
+      <a class="sidebar-link {{ 'is-active' if path.startswith('/admin/notifications') else '' }}" href="/admin/notifications">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 7h18s-3 0-3-7"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span>Уведомления</span>
+      </a>
+      <a class="sidebar-link {{ 'is-active' if path.startswith('/admin/import-errors') else '' }}" href="/admin/import-errors">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 9v4M12 17h.01"/><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/></svg>
+        <span>Ошибки импорта</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-admin">
+      <div class="admin-avatar">А</div>
+      <div>
+        <div class="admin-name">Администратор</div>
+        <div class="admin-status"><span></span> Онлайн</div>
+      </div>
+    </div>
+    <button type="button" class="sidebar-collapse">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m15 18-6-6 6-6"/></svg>
+      <span>Свернуть меню</span>
+    </button>
+  </aside>
+
+  <main class="main-content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <nav class="bottom-nav">
+    <a class="{{ 'is-active' if path == '/admin' else '' }}" href="/admin">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+      <span>Главная</span>
+    </a>
+    <a class="{{ 'is-active' if path.startswith('/admin/employees') else '' }}" href="/admin/employees">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+      <span>Работники</span>
+    </a>
+    <a class="{{ 'is-active' if path.startswith('/admin/kip') else '' }}" href="/admin/kip">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg>
+      <span>КИП</span>
+    </a>
+    <a class="{{ 'is-active' if path.startswith('/admin/notifications') else '' }}" href="/admin/notifications">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 7h18s-3 0-3-7"/></svg>
+      <span>Уведомления</span>
+    </a>
+    <button type="button" onclick="document.getElementById('mobile-more-menu').classList.toggle('is-open')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 12h.01M19 12h.01M5 12h.01"/></svg>
+      <span>Ещё</span>
+    </button>
+  </nav>
+</body>
+</html>

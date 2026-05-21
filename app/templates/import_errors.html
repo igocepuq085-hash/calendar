@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-6">Ошибки импорта</h1>
+<div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-slate-100 text-slate-600"><tr><th class="p-3">Файл</th><th class="p-3">Строка</th><th class="p-3 text-left">Сообщение</th></tr></thead>
+    <tbody>{% for error in errors %}<tr class="border-t border-slate-100"><td class="p-3 text-center">{{ error.uploaded_file_id or "" }}</td><td class="p-3 text-center">{{ error.row_number or "" }}</td><td class="p-3">{{ error.message }}</td></tr>{% endfor %}</tbody>
+  </table>
+</div>
+{% endblock %}
+

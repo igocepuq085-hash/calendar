@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-6">Предпросмотр импорта</h1>
+<section class="bg-white border border-slate-200 rounded-lg p-4 mb-4">
+  <p class="text-sm">Файл: <b>{{ upload.original_filename }}</b></p>
+  <div class="grid md:grid-cols-4 gap-3 mt-4 text-sm">
+    <p>Строк найдено: <b>{{ upload.rows_found }}</b></p>
+    <p>Работников найдено: <b>{{ upload.employees_found }}</b></p>
+    <p>Событий создано: <b>{{ upload.events_created }}</b></p>
+    <p>Ошибок: <b>{{ upload.errors_count }}</b></p>
+  </div>
+  <form method="post" action="/admin/uploads/{{ upload.id }}/confirm" class="mt-4">
+    <button class="bg-slate-900 text-white rounded px-3 py-2 text-sm">Подтвердить импорт</button>
+  </form>
+</section>
+<section class="bg-white border border-slate-200 rounded-lg p-4">
+  <h2 class="font-semibold mb-3">Нераспознанные строки</h2>
+  {% for error in errors %}
+    <p class="text-sm py-1">Строка {{ error.row_number or "" }}: {{ error.message }}</p>
+  {% else %}
+    <p class="text-sm text-slate-500">Ошибок нет</p>
+  {% endfor %}
+</section>
+{% endblock %}
+

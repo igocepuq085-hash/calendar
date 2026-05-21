@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-6">Загрузка файлов</h1>
+<form method="post" action="/admin/uploads/preview" enctype="multipart/form-data" class="bg-white border border-slate-200 rounded-lg p-4 mb-6 flex gap-3 items-end">
+  <label class="text-sm flex-1">
+    <span class="text-slate-600">Excel-файл</span>
+    <input type="file" name="file" accept=".xlsx" class="mt-1 block w-full border border-slate-300 rounded px-3 py-2">
+  </label>
+  <button class="bg-slate-900 text-white rounded px-3 py-2 text-sm">Предпросмотр</button>
+</form>
+<div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-slate-100 text-slate-600"><tr><th class="text-left p-3">Файл</th><th class="p-3">Парсер</th><th class="p-3">Строк</th><th class="p-3">Событий</th><th class="p-3">Ошибок</th><th></th></tr></thead>
+    <tbody>
+      {% for upload in uploads %}
+      <tr class="border-t border-slate-100">
+        <td class="p-3">{{ upload.original_filename }}</td><td class="p-3 text-center">{{ upload.parser_name }}</td><td class="p-3 text-center">{{ upload.rows_found }}</td><td class="p-3 text-center">{{ upload.events_created }}</td><td class="p-3 text-center">{{ upload.errors_count }}</td>
+        <td class="p-3 text-right"><a href="/admin/uploads/{{ upload.id }}/preview" class="text-blue-700">Открыть</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+

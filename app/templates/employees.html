@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero-card fade-in">
+  <div>
+    <div class="eyebrow">Персональные календари</div>
+    <h1>Работники</h1>
+    <p>Цвет карточки показывает только события допуска: КИП, проверки, инструктажи и медкомиссии. Рабочий график здесь не учитывается.</p>
+  </div>
+</section>
+
+<div class="status-legend">
+  <span class="status-badge status-ok">Допуск в норме</span>
+  <span class="status-badge status-soon">Скоро проверка</span>
+  <span class="status-badge status-overdue">Есть просрочка</span>
+  <span class="status-badge status-inactive">Неактивен</span>
+</div>
+
+<section class="employees-grid">
+  {% for card in cards %}
+    {% set employee = card.employee %}
+    {% set state_class = 'status-inactive' if card.state == 'inactive' else 'status-overdue' if card.state == 'danger' else 'status-soon' if card.state == 'warning' else 'status-ok' if card.state == 'success' else 'status-muted' %}
+    <a href="/admin/employees/{{ employee.id }}" class="employee-card {{ state_class }}">
+      <div class="employee-card-top">
+        <div>
+          <h2>{{ employee.full_name }}</h2>
+          <p>{{ employee.position or "Должность не указана" }}</p>
+        </div>
+        <span class="status-badge {{ state_class }}">{{ card.state|access_state_label }}</span>
+      </div>
+      <div class="employee-meta">
+        <div>
+          <span>Табельный</span>
+          <strong>{{ employee.tab_number or "нет" }}</strong>
+        </div>
+        <div>
+          <span>Подразделение</span>
+          <strong>{{ employee.department or "СЛХ" }}</strong>
+        </div>
+      </div>
+      <div class="employee-next">
+        <span>Ближайшее событие</span>
+        <strong>{{ card.note }}</strong>
+      </div>
+    </a>
+  {% else %}
+    <div class="empty-state">Работники пока не импортированы</div>
+  {% endfor %}
+</section>
+{% endblock %}

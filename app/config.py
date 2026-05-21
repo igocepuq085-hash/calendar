@@ -1,0 +1,28 @@
+from functools import lru_cache
+from hashlib import sha256
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    database_url: str = "sqlite:///./kip_calendar.db"
+    secret_key: str = "change-me"
+    admin_username: str = "admin"
+    admin_password: str = "admin"
+    admin_calendar_token: str | None = None
+    base_url: str = "http://localhost:8000"
+    upload_dir: str = "uploads"
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+def get_admin_calendar_token() -> str:
+    settings = get_settings()
+    if settings.admin_calendar_token:
+        return settings.admin_calendar_token
+    return sha256(f"{settings.secret_key}:admin-calendar".encode()).hexdigest()[:40]

@@ -1,0 +1,29 @@
+[project]
+name = "kip-calendar-service"
+version = "0.1.0"
+description = "FastAPI service for employee work and KIP calendars"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.13.0",
+    "fastapi>=0.111.0",
+    "icalendar>=5.0.0",
+    "jinja2>=3.1.0",
+    "openpyxl>=3.1.0",
+    "psycopg[binary]>=3.1.0",
+    "pydantic-settings>=2.2.0",
+    "python-dateutil>=2.9.0",
+    "python-multipart>=0.0.9",
+    "sqlalchemy>=2.0.0",
+    "uvicorn[standard]>=0.30.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx>=0.27.0",
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
