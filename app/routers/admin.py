@@ -63,7 +63,7 @@ def render(request: Request, template: str, context: dict, status_code: int = 20
     context.setdefault("request", request)
     context.setdefault("settings", get_settings())
     context.setdefault("admin_calendar_url", f"{get_settings().base_url}/cal/admin/{get_admin_calendar_token()}.ics")
-    return templates.TemplateResponse(template, context, status_code=status_code)
+    return templates.TemplateResponse(request, template, context, status_code=status_code)
 
 
 def _parse_date(value: str | None) -> date | None:
