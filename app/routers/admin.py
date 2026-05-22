@@ -164,7 +164,28 @@ def _employee_access_cards(db: Session, employees: list[Employee]) -> list[dict]
                 note = "Проверки не загружены"
                 nearest = None
         cards.append({"employee": employee, "state": state, "note": note, "nearest": nearest})
-    return cards
+    return sorted(
+        cards,
+        key=lambda card: (
+            1 if card["state"] == "inactive" else 0,
+            card["nearest"]["date"] if card["nearest"] else date.max,
+            -state_rank(card["state"]),
+            card["employee"].full_name,
+        ),
+    )
+
+
+def _access_summary(db: Session) -> dict:
+    active_employees = db.scalars(select(Employee).where(Employee.status == EmployeeStatus.active)).all()
+    cards = _employee_access_cards(db, active_employees)
+    active_total = len(active_employees)
+    admitted_count = sum(1 for card in cards if card["state"] in {"success", "warning"})
+    admission_percent = round((admitted_count / active_total) * 100) if active_total else 100
+    return {
+        "active_total": active_total,
+        "admitted_count": admitted_count,
+        "admission_percent": admission_percent,
+    }
 
 
 def _audit(db: Session, action: str, entity_type: str, entity_id: int, message: str) -> None:
@@ -212,21 +233,29 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
         .join(KipRecord.employee)
         .options(selectinload(KipRecord.employee))
         .where(KipRecord.status == KipStatus.conflict, Employee.status == EmployeeStatus.active)
+        .order_by(KipRecord.due_date, Employee.full_name)
         .limit(100)
     ).all()
-    real_kip_conflicts = [row for row in kip_conflicts if schedule_until.get(row.employee_id) and schedule_until[row.employee_id] >= row.due_date]
-    waiting_kip_schedule = [row for row in kip_conflicts if not schedule_until.get(row.employee_id) or schedule_until[row.employee_id] < row.due_date]
+    real_kip_conflicts = sorted(
+        [row for row in kip_conflicts if schedule_until.get(row.employee_id) and schedule_until[row.employee_id] >= row.due_date],
+        key=lambda row: (row.due_date, row.employee.full_name),
+    )
+    waiting_kip_schedule = sorted(
+        [row for row in kip_conflicts if not schedule_until.get(row.employee_id) or schedule_until[row.employee_id] < row.due_date],
+        key=lambda row: (row.due_date, row.employee.full_name),
+    )
     context = {
-        "kip_soon": db.scalars(select(KipRecord).join(KipRecord.employee).options(selectinload(KipRecord.employee)).where(KipRecord.due_date.between(today, next_14), Employee.status == EmployeeStatus.active).limit(20)).all(),
-        "kip_overdue": db.scalars(select(KipRecord).join(KipRecord.employee).options(selectinload(KipRecord.employee)).where(KipRecord.status == KipStatus.overdue, Employee.status == EmployeeStatus.active).limit(20)).all(),
+        "access_summary": _access_summary(db),
+        "kip_soon": db.scalars(select(KipRecord).join(KipRecord.employee).options(selectinload(KipRecord.employee)).where(KipRecord.due_date.between(today, next_14), Employee.status == EmployeeStatus.active).order_by(KipRecord.due_date, Employee.full_name).limit(20)).all(),
+        "kip_overdue": db.scalars(select(KipRecord).join(KipRecord.employee).options(selectinload(KipRecord.employee)).where(KipRecord.status == KipStatus.overdue, Employee.status == EmployeeStatus.active).order_by(KipRecord.due_date, Employee.full_name).limit(20)).all(),
         "kip_conflicts": real_kip_conflicts[:20],
         "waiting_kip_schedule": waiting_kip_schedule[:20],
         "knowledge_month": db.scalars(select(KnowledgeCheck).join(KnowledgeCheck.employee).options(selectinload(KnowledgeCheck.employee)).where(KnowledgeCheck.next_date.between(month_start, month_end), Employee.status == EmployeeStatus.active).order_by(KnowledgeCheck.next_date).limit(80)).all(),
         "knowledge_week": db.scalars(select(KnowledgeCheck).join(KnowledgeCheck.employee).options(selectinload(KnowledgeCheck.employee)).where(KnowledgeCheck.next_date.between(today, next_7), Employee.status == EmployeeStatus.active).order_by(KnowledgeCheck.next_date).limit(40)).all(),
         "control_month": control_month,
         "control_week": control_week,
-        "knowledge_soon": db.scalars(select(KnowledgeCheck).options(selectinload(KnowledgeCheck.employee)).where(KnowledgeCheck.next_date.between(today, next_14)).limit(20)).all(),
-        "medical_soon": db.scalars(select(MedicalCheck).options(selectinload(MedicalCheck.employee)).where(MedicalCheck.next_date.between(today, next_14)).limit(20)).all(),
+        "knowledge_soon": db.scalars(select(KnowledgeCheck).join(KnowledgeCheck.employee).options(selectinload(KnowledgeCheck.employee)).where(KnowledgeCheck.next_date.between(today, next_14), Employee.status == EmployeeStatus.active).order_by(KnowledgeCheck.next_date, Employee.full_name).limit(20)).all(),
+        "medical_soon": db.scalars(select(MedicalCheck).join(MedicalCheck.employee).options(selectinload(MedicalCheck.employee)).where(MedicalCheck.next_date.between(today, next_14), Employee.status == EmployeeStatus.active).order_by(MedicalCheck.next_date, Employee.full_name).limit(20)).all(),
         "last_errors": db.scalars(select(ImportErrorRecord).order_by(ImportErrorRecord.id.desc()).limit(10)).all(),
         "month_start": month_start,
         "month_end": month_end,
@@ -410,7 +439,7 @@ def work_shifts(request: Request, db: Session = Depends(get_db)) -> HTMLResponse
 
 @router.get("/kip", response_class=HTMLResponse, dependencies=[Depends(admin_dependency)])
 def kip_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
-    rows = db.scalars(select(KipRecord).options(selectinload(KipRecord.employee)).order_by(KipRecord.due_date.desc()).limit(100)).all()
+    rows = db.scalars(select(KipRecord).options(selectinload(KipRecord.employee)).order_by(KipRecord.due_date, KipRecord.id).limit(100)).all()
     schedule_until = _schedule_until_by_employee(db)
     for row in rows:
         row.schedule_until = schedule_until.get(row.employee_id)

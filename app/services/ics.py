@@ -304,7 +304,7 @@ def build_employee_calendar(db: Session, employee: Employee) -> bytes:
     employee = _load_employee(db, employee)
     settings = list(db.scalars(select(NotificationSetting)))
     if Calendar is None:
-        lines = _manual_calendar(f"Календарь {employee.full_name}")
+        lines = _manual_calendar(f"Производственный календарь {employee.full_name}")
         _add_employee_events_to_manual_calendar(lines, employee, settings, include_shifts=True, include_employee_name=False)
         lines.append("END:VCALENDAR")
         return ("\r\n".join(lines) + "\r\n").encode("utf-8")
@@ -313,7 +313,7 @@ def build_employee_calendar(db: Session, employee: Employee) -> bytes:
     calendar.add("prodid", "-//KIP Calendar Service//RU")
     calendar.add("version", "2.0")
     calendar.add("calscale", "GREGORIAN")
-    calendar.add("x-wr-calname", f"Календарь {employee.full_name}")
+    calendar.add("x-wr-calname", f"Производственный календарь {employee.full_name}")
     _add_employee_events_to_calendar(calendar, employee, settings, include_shifts=True, include_employee_name=False)
     return calendar.to_ical()
 
@@ -331,7 +331,7 @@ def build_admin_calendar(db: Session) -> bytes:
     ).all()
     settings = list(db.scalars(select(NotificationSetting)))
     if Calendar is None:
-        lines = _manual_calendar("КИП календарь администратора")
+        lines = _manual_calendar("Производственный календарь администратора")
         for employee in employees:
             _add_employee_events_to_manual_calendar(lines, employee, settings, include_shifts=False, include_employee_name=True)
         lines.append("END:VCALENDAR")
@@ -341,8 +341,7 @@ def build_admin_calendar(db: Session) -> bytes:
     calendar.add("prodid", "-//KIP Calendar Service//RU")
     calendar.add("version", "2.0")
     calendar.add("calscale", "GREGORIAN")
-    calendar.add("x-wr-calname", "КИП календарь администратора")
+    calendar.add("x-wr-calname", "Производственный календарь администратора")
     for employee in employees:
         _add_employee_events_to_calendar(calendar, employee, settings, include_shifts=False, include_employee_name=True)
     return calendar.to_ical()
-
