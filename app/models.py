@@ -75,6 +75,7 @@ class Employee(TimestampMixin, Base):
     knowledge_checks: Mapped[list[KnowledgeCheck]] = relationship(back_populates="employee", cascade="all, delete-orphan")
     medical_checks: Mapped[list[MedicalCheck]] = relationship(back_populates="employee", cascade="all, delete-orphan")
     instructor_trips: Mapped[list[InstructorTrip]] = relationship(back_populates="employee", cascade="all, delete-orphan")
+    calendar_notices: Mapped[list[CalendarNotice]] = relationship(back_populates="employee", cascade="all, delete-orphan")
 
 
 class WorkShift(TimestampMixin, Base):
@@ -147,6 +148,20 @@ class InstructorTrip(TimestampMixin, Base):
     employee: Mapped[Employee] = relationship(back_populates="instructor_trips")
 
 
+class CalendarNotice(TimestampMixin, Base):
+    __tablename__ = "calendar_notices"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str | None] = mapped_column(Text)
+    notify_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    source: Mapped[str | None] = mapped_column(String(128))
+
+    employee: Mapped[Employee] = relationship(back_populates="calendar_notices")
+
+
 class UploadedFile(TimestampMixin, Base):
     __tablename__ = "uploaded_files"
 
@@ -190,4 +205,3 @@ class AuditLog(TimestampMixin, Base):
     entity_type: Mapped[str] = mapped_column(String(128))
     entity_id: Mapped[int | None] = mapped_column(Integer)
     message: Mapped[str] = mapped_column(Text)
-

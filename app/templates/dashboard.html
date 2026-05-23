@@ -21,15 +21,9 @@
 <section class="kpi-grid fade-in">
   <a href="/admin/kip" class="kpi-card kpi-blue">
     <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="5" width="18" height="16" rx="2"/><path d="m9 15 2 2 4-5"/></svg></div>
-    <div class="kpi-number">{{ kip_soon|length }}</div>
+    <div class="kpi-number">{{ kip_soon|length + kip_overdue|length }}</div>
     <div class="kpi-label">КИП</div>
-    <div class="kpi-trend">в ближайшие 14 дней</div>
-  </a>
-  <a href="/admin/kip" class="kpi-card kpi-red">
-    <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16h.01"/></svg></div>
-    <div class="kpi-number">{{ kip_overdue|length }}</div>
-    <div class="kpi-label">Просроченные КИП</div>
-    <div class="kpi-trend">требуют внимания</div>
+    <div class="kpi-trend">скоро: {{ kip_soon|length }} · просрочено: {{ kip_overdue|length }}</div>
   </a>
   <a href="/admin/knowledge" class="kpi-card kpi-purple">
     <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M4 4v15.5"/><path d="M8 4h11a1 1 0 0 1 1 1v16H8a4 4 0 0 1-4-4V8a4 4 0 0 1 4-4Z"/></svg></div>
@@ -139,20 +133,16 @@
 
 <div class="dashboard-grid dashboard-grid-small">
   <section class="soft-card">
-    <h2>КИП в ближайшие 14 дней</h2>
+    <h2>КИП</h2>
     {% for item in kip_soon %}
       <p class="soft-line">{{ item.due_date }} · {{ item.employee.full_name }}</p>
-    {% else %}
-      <p class="empty-state">Нет событий</p>
     {% endfor %}
-  </section>
-  <section class="soft-card soft-card-red">
-    <h2>Просроченные КИП</h2>
     {% for item in kip_overdue %}
       <p class="soft-line text-red">{{ item.due_date }} · {{ item.employee.full_name }}</p>
-    {% else %}
-      <p class="empty-state">Нет событий</p>
     {% endfor %}
+    {% if not kip_soon and not kip_overdue %}
+      <p class="empty-state">Нет событий</p>
+    {% endif %}
   </section>
   <section class="soft-card soft-card-orange">
     <h2>Конфликты КИП</h2>

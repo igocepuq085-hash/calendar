@@ -30,6 +30,11 @@
     <form method="post" action="/admin/logout"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>Выйти</button></form>
   </div>
 
+  <div id="dirty-save-banner" class="dirty-save-banner">
+    <strong>Есть несохраненные изменения</strong>
+    <span>Нажмите «Сохранить», чтобы дата попала в календарь.</span>
+  </div>
+
   <aside class="sidebar">
     <div class="sidebar-brand">
       <div class="brand-mark">
@@ -119,5 +124,38 @@
       <span>Ещё</span>
     </button>
   </nav>
+  <script>
+    (() => {
+      if (window.location.pathname === "/admin/login") return;
+      const banner = document.getElementById("dirty-save-banner");
+      const watchedForms = Array.from(document.querySelectorAll("form")).filter((form) => {
+        if (form.method.toLowerCase() !== "post") return false;
+        return Boolean(form.querySelector("input[type='date'], input[type='datetime-local']"));
+      });
+      const snapshot = (form) => {
+        const data = new FormData(form);
+        data.delete("csrf_token");
+        return JSON.stringify(Array.from(data.entries()).sort());
+      };
+      const initial = new WeakMap();
+      let submitting = false;
+      const refresh = () => {
+        const dirtyForms = watchedForms.filter((form) => snapshot(form) !== initial.get(form));
+        watchedForms.forEach((form) => form.classList.toggle("is-dirty", dirtyForms.includes(form)));
+        banner.classList.toggle("is-visible", dirtyForms.length > 0);
+      };
+      watchedForms.forEach((form) => {
+        initial.set(form, snapshot(form));
+        form.addEventListener("input", refresh);
+        form.addEventListener("change", refresh);
+        form.addEventListener("submit", () => { submitting = true; });
+      });
+      window.addEventListener("beforeunload", (event) => {
+        if (submitting || !banner.classList.contains("is-visible")) return;
+        event.preventDefault();
+        event.returnValue = "";
+      });
+    })();
+  </script>
 </body>
 </html>

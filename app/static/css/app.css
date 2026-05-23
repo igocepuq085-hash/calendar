@@ -525,6 +525,44 @@ textarea {
   background: rgba(255,255,255,.78) !important;
 }
 
+.dirty-save-banner {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 86px;
+  z-index: 80;
+  display: none;
+  gap: 4px;
+  padding: 13px 16px;
+  border-radius: 18px;
+  color: #92400e;
+  background: rgba(255, 251, 235, .94);
+  border: 1px solid rgba(245, 158, 11, .28);
+  box-shadow: 0 18px 42px rgba(245, 158, 11, .18);
+  backdrop-filter: blur(18px);
+}
+.dirty-save-banner.is-visible {
+  display: grid;
+}
+.dirty-save-banner strong {
+  font-size: 14px;
+}
+.dirty-save-banner span {
+  font-size: 12px;
+}
+form.is-dirty {
+  outline: 2px solid rgba(245, 158, 11, .45);
+  outline-offset: 4px;
+  border-radius: 16px;
+}
+form.is-dirty button[type="submit"],
+form.is-dirty button:not([type]) {
+  color: #fff !important;
+  border-color: transparent !important;
+  background: linear-gradient(135deg, #f59e0b, #2563eb) !important;
+  box-shadow: 0 12px 26px rgba(245, 158, 11, .22);
+}
+
 @media (max-width: 767px) {
   .hero-card { padding: 20px; }
   .hero-card h1 { font-size: 25px; }
@@ -647,6 +685,11 @@ textarea {
     margin-left: 288px;
     padding: 32px;
     padding-bottom: 32px;
+  }
+  .dirty-save-banner {
+    left: 320px;
+    right: 32px;
+    bottom: 28px;
   }
   .desktop-only { display: flex; }
   .hero-card {

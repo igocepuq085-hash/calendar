@@ -10,6 +10,7 @@ from app.main import app
 from app.models import Employee, EventType, KipStatus, KnowledgeCheck, MedicalCheck, NotificationSetting, ShiftType, WorkShift
 from app.routers.calendar import ICS_HEADERS
 from app.database import get_db
+from app.services.calendar_notices import create_calendar_notice
 from app.services.ics import build_admin_calendar, build_employee_calendar
 from app.services.kip import KIP_LATE_ERROR, change_kip_date, default_shift_times, plan_kip_record, recalculate_all_kip_records
 
@@ -149,6 +150,25 @@ def test_work_shift_calendar_uses_yekaterinburg_marker_times(db: Session) -> Non
     assert "DTSTART;TZID=Asia/Yekaterinburg:20260523T200000" in content
     assert "DTEND;TZID=Asia/Yekaterinburg:20260523T210000" in content
     assert "20260523T010000" not in content
+
+
+def test_calendar_notice_appears_in_employee_calendar_with_alarm(db: Session) -> None:
+    worker = employee(db)
+    create_calendar_notice(
+        db,
+        employee_id=worker.id,
+        title="⚠️ Изменение графика",
+        description="2026-05-22: day -> night",
+        now=datetime(2026, 5, 22, 10, 0),
+    )
+    db.flush()
+
+    content = build_employee_calendar(db, worker).decode("utf-8")
+
+    assert "SUMMARY:⚠️ Изменение графика" in content
+    assert "DESCRIPTION:2026-05-22: day -> night" in content
+    assert "DTSTART;TZID=Asia/Yekaterinburg:20260522T105500" in content
+    assert "TRIGGER:PT0M" in content
 
 
 def test_calendar_endpoint_disables_cache(db: Session) -> None:

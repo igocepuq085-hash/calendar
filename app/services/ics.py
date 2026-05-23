@@ -6,7 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
-from app.models import Employee, EmployeeStatus, EventType, KipStatus, NotificationSetting, ShiftType
+from app.models import CalendarNotice, Employee, EmployeeStatus, EventType, KipStatus, NotificationSetting, ShiftType
+from app.services.calendar_notices import NOTICE_DURATION, calendar_now
 
 try:
     from icalendar import Alarm, Calendar, Event
@@ -20,6 +21,7 @@ SUMMARY = {
     "kip": "🟠 КИП",
     "knowledge_check": "🔴 Проверка знаний",
     "medical_check": "🟣 Медицинская комиссия",
+    "notice": "⚠️ Изменение даты",
 }
 
 CORE_KNOWLEDGE_MARKERS = ["по от", "по эб", "строп", "кран", "высот"]
@@ -227,6 +229,16 @@ def _manual_alarm_lines(event_type: EventType, settings: list[NotificationSettin
     return lines
 
 
+def _manual_notice_alarm_lines() -> list[str]:
+    return [
+        "BEGIN:VALARM",
+        "ACTION:DISPLAY",
+        "TRIGGER:PT0M",
+        "DESCRIPTION:Изменение в календаре",
+        "END:VALARM",
+    ]
+
+
 def _manual_event(
     *,
     uid: str,
@@ -258,6 +270,40 @@ def _manual_event(
     return lines
 
 
+def _manual_notice_event(notice: CalendarNotice) -> list[str]:
+    start = _calendar_datetime(notice.notify_at, notice.notify_at.date(), time(9, 0))
+    end = start + NOTICE_DURATION
+    stamp = _event_stamp(notice)
+    lines = [
+        "BEGIN:VEVENT",
+        f"UID:{_uid('notice', notice.id)}",
+        f"SUMMARY:{_escape(notice.title)}",
+        f"DTSTAMP:{_format_utc_dt(datetime.now(timezone.utc))}",
+        f"LAST-MODIFIED:{_format_utc_dt(stamp)}",
+        f"SEQUENCE:{_sequence(stamp)}",
+        f"DTSTART;TZID={_calendar_tz_name()}:{_format_dt(start)}",
+        f"DTEND;TZID={_calendar_tz_name()}:{_format_dt(end)}",
+    ]
+    if notice.description:
+        lines.append(f"DESCRIPTION:{_escape(notice.description)}")
+    lines.extend(_manual_notice_alarm_lines())
+    lines.append("END:VEVENT")
+    return lines
+
+
+def _notice_event(notice: CalendarNotice) -> Event:
+    start = _calendar_datetime(notice.notify_at, notice.notify_at.date(), time(9, 0))
+    event = _timed_event(notice.title, start, start + NOTICE_DURATION, notice.notify_at.date(), _uid("notice", notice.id), _event_stamp(notice))
+    if notice.description:
+        event.add("description", notice.description)
+    alarm = Alarm()
+    alarm.add("action", "DISPLAY")
+    alarm.add("description", "Изменение в календаре")
+    alarm.add("trigger", timedelta(0))
+    event.add_component(alarm)
+    return event
+
+
 def _load_employee(db: Session, employee: Employee) -> Employee:
     return db.scalar(
         select(Employee)
@@ -267,7 +313,16 @@ def _load_employee(db: Session, employee: Employee) -> Employee:
             selectinload(Employee.kip_records),
             selectinload(Employee.knowledge_checks),
             selectinload(Employee.medical_checks),
+            selectinload(Employee.calendar_notices),
         )
+    )
+
+
+def _active_notices(employee: Employee) -> list[CalendarNotice]:
+    now = calendar_now()
+    return sorted(
+        [notice for notice in employee.calendar_notices if notice.expires_at >= now],
+        key=lambda notice: (notice.notify_at, notice.id),
     )
 
 
@@ -341,6 +396,9 @@ def _add_employee_events_to_manual_calendar(
             )
         )
 
+    for notice in _active_notices(employee):
+        lines.extend(_manual_notice_event(notice))
+
 
 def _add_employee_events_to_calendar(
     calendar: Calendar,
@@ -394,6 +452,9 @@ def _add_employee_events_to_calendar(
         event = _all_day_event(f"{SUMMARY['medical_check']}{name_suffix}", check.next_date, _uid("medical", check.id), _event_stamp(check))
         _add_alarms(event, EventType.medical_check, settings)
         calendar.add_component(event)
+
+    for notice in _active_notices(employee):
+        calendar.add_component(_notice_event(notice))
 
 
 def _manual_calendar(name: str) -> list[str]:
