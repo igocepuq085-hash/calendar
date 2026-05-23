@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Вход</title>
-  <link rel="stylesheet" href="/static/css/app.css?v=20260523-4">
+  <link rel="stylesheet" href="/static/css/app.css?v=20260523-5">
 </head>
 <body class="login-page">
   <main class="login-shell">
@@ -33,16 +33,8 @@
         <span>Пароль</span>
         <input name="password" type="password" autocomplete="current-password" required>
       </label>
-      <button id="login-submit" type="submit" class="login-submit">Войти</button>
+      <button type="submit" class="login-submit">Войти</button>
     </form>
   </main>
-  <script>
-    const form = document.getElementById("login-form");
-    const button = document.getElementById("login-submit");
-    form.addEventListener("submit", () => {
-      button.disabled = true;
-      button.textContent = "Входим...";
-    });
-  </script>
 </body>
 </html>

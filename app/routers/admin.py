@@ -276,9 +276,10 @@ def login_page(request: Request) -> HTMLResponse:
 def login(request: Request, username: str = Form(...), password: str = Form(...)) -> RedirectResponse:
     settings = get_settings()
     key = _client_key(request, username)
-    if _rate_limited(key):
-        return RedirectResponse("/admin/login?locked=1", status_code=303)
-    if not hmac.compare_digest(username, settings.admin_username) or not hmac.compare_digest(password, settings.admin_password):
+    credentials_ok = hmac.compare_digest(username, settings.admin_username) and hmac.compare_digest(password, settings.admin_password)
+    if not credentials_ok:
+        if _rate_limited(key):
+            return RedirectResponse("/admin/login?locked=1", status_code=303)
         _record_failed_login(key)
         return RedirectResponse("/admin/login?error=1", status_code=303)
     _clear_failed_logins(key)

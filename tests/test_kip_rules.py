@@ -67,7 +67,30 @@ def test_admin_login_redirects_and_sets_session_cookie() -> None:
     assert COOKIE_NAME in response.headers["set-cookie"]
 
 
-def test_admin_login_rate_limit_returns_login_page_redirect() -> None:
+def test_admin_login_rate_limit_returns_login_page_redirect_for_wrong_password() -> None:
+    settings = get_settings()
+    LOGIN_ATTEMPTS.clear()
+    client = TestClient(app)
+
+    for _ in range(MAX_LOGIN_ATTEMPTS):
+        client.post(
+            "/admin/login",
+            data={"username": settings.admin_username, "password": "wrong"},
+            follow_redirects=False,
+        )
+
+    response = client.post(
+        "/admin/login",
+        data={"username": settings.admin_username, "password": "still-wrong"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin/login?locked=1"
+    LOGIN_ATTEMPTS.clear()
+
+
+def test_admin_login_valid_credentials_clear_previous_failed_attempts() -> None:
     settings = get_settings()
     LOGIN_ATTEMPTS.clear()
     client = TestClient(app)
@@ -86,8 +109,9 @@ def test_admin_login_rate_limit_returns_login_page_redirect() -> None:
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/admin/login?locked=1"
-    LOGIN_ATTEMPTS.clear()
+    assert response.headers["location"] == "/admin"
+    assert COOKIE_NAME in response.headers["set-cookie"]
+    assert LOGIN_ATTEMPTS == {}
 
 
 def test_kip_planned_on_due_date_when_shift_exists(db: Session) -> None:
