@@ -25,8 +25,8 @@ SUMMARY = {
 }
 
 CORE_KNOWLEDGE_MARKERS = ["по от", "по эб", "строп", "кран", "высот"]
-SHIFT_MARKER_DURATION = timedelta(hours=1)
-ICS_EVENT_VERSION = 2
+SHORT_EVENT_DURATION = timedelta(hours=1)
+ICS_EVENT_VERSION = 3
 
 
 def _uid(prefix: str, item_id: int) -> str:
@@ -61,15 +61,14 @@ def _calendar_datetime(value: datetime | None, fallback_date: date, fallback_tim
     return _local_wall_datetime(value)
 
 
-def _shift_marker_times(shift_date: date, shift_type: ShiftType) -> tuple[datetime, datetime]:
+def _shift_start_datetime(shift_date: date, shift_type: ShiftType, start_datetime: datetime | None = None) -> datetime:
     marker_time = time(20, 0) if shift_type == ShiftType.night else time(8, 0)
-    start = datetime.combine(shift_date, marker_time).replace(tzinfo=_calendar_tz())
-    return start, start + SHIFT_MARKER_DURATION
+    return _calendar_datetime(start_datetime, shift_date, marker_time)
 
 
 def _short_marker_times(start: datetime | None, fallback_date: date, fallback_time: time) -> tuple[datetime, datetime]:
     local_start = _calendar_datetime(start, fallback_date, fallback_time)
-    return local_start, local_start + SHIFT_MARKER_DURATION
+    return local_start, local_start + SHORT_EVENT_DURATION
 
 
 def _as_utc(value: datetime | None) -> datetime:
@@ -179,6 +178,17 @@ def _timed_event(summary: str, start: datetime | None, end: datetime | None, fal
     return event
 
 
+def _point_event(summary: str, start: datetime | None, fallback_date: date, uid: str, stamp: datetime) -> Event:
+    if start is None:
+        start = datetime.combine(fallback_date, time(9, 0))
+    event = Event()
+    event.add("uid", uid)
+    event.add("summary", summary)
+    event.add("dtstart", start)
+    _add_event_metadata(event, stamp)
+    return event
+
+
 def _format_dt(value: date | datetime) -> str:
     if isinstance(value, datetime):
         return value.strftime("%Y%m%dT%H%M%S")
@@ -244,7 +254,7 @@ def _manual_event(
     uid: str,
     summary: str,
     start: date | datetime,
-    end: date | datetime,
+    end: date | datetime | None,
     event_type: EventType,
     settings: list[NotificationSetting],
     subtype: str | None = None,
@@ -261,7 +271,8 @@ def _manual_event(
     ]
     if isinstance(start, datetime):
         lines.append(f"DTSTART;TZID={_calendar_tz_name()}:{_format_dt(start)}")
-        lines.append(f"DTEND;TZID={_calendar_tz_name()}:{_format_dt(end)}")
+        if end is not None:
+            lines.append(f"DTEND;TZID={_calendar_tz_name()}:{_format_dt(end)}")
     else:
         lines.append(f"DTSTART;VALUE=DATE:{_format_dt(start)}")
         lines.append(f"DTEND;VALUE=DATE:{_format_dt(end)}")
@@ -342,13 +353,13 @@ def _add_employee_events_to_manual_calendar(
                 continue
             summary_key = "day_shift" if shift.shift_type == ShiftType.day else "night_shift"
             event_type = EventType.day_shift if shift.shift_type == ShiftType.day else EventType.night_shift
-            start, end = _shift_marker_times(shift.shift_date, shift.shift_type)
+            start = _shift_start_datetime(shift.shift_date, shift.shift_type, shift.start_datetime)
             lines.extend(
                 _manual_event(
                     uid=_stable_shift_uid(shift.employee_id, shift.shift_date, shift.shift_type),
                     summary=f"{SUMMARY[summary_key]}{name_suffix}",
                     start=start,
-                    end=end,
+                    end=None,
                     event_type=event_type,
                     settings=settings,
                     stamp=_event_stamp(shift),
@@ -415,11 +426,10 @@ def _add_employee_events_to_calendar(
     if include_shifts:
         for shift in employee.work_shifts:
             if shift.shift_type == ShiftType.day:
-                start, end = _shift_marker_times(shift.shift_date, shift.shift_type)
-                event = _timed_event(
+                start = _shift_start_datetime(shift.shift_date, shift.shift_type, shift.start_datetime)
+                event = _point_event(
                     f"{SUMMARY['day_shift']}{name_suffix}",
                     start,
-                    end,
                     shift.shift_date,
                     _stable_shift_uid(shift.employee_id, shift.shift_date, shift.shift_type),
                     _event_stamp(shift),
@@ -427,11 +437,10 @@ def _add_employee_events_to_calendar(
                 _add_alarms(event, EventType.day_shift, settings)
                 calendar.add_component(event)
             elif shift.shift_type == ShiftType.night:
-                start, end = _shift_marker_times(shift.shift_date, shift.shift_type)
-                event = _timed_event(
+                start = _shift_start_datetime(shift.shift_date, shift.shift_type, shift.start_datetime)
+                event = _point_event(
                     f"{SUMMARY['night_shift']}{name_suffix}",
                     start,
-                    end,
                     shift.shift_date,
                     _stable_shift_uid(shift.employee_id, shift.shift_date, shift.shift_type),
                     _event_stamp(shift),

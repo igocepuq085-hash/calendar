@@ -140,16 +140,18 @@ def test_shift_uid_is_stable_after_schedule_reimport(db: Session) -> None:
 def test_work_shift_calendar_uses_yekaterinburg_marker_times(db: Session) -> None:
     worker = employee(db)
     add_shift(db, worker.id, date(2026, 5, 22), ShiftType.day)
-    add_shift(db, worker.id, date(2026, 5, 23), ShiftType.night)
+    night_shift = add_shift(db, worker.id, date(2026, 5, 23), ShiftType.night)
+    night_shift.end_datetime = datetime(2026, 5, 25, 3, 30)
+    night_shift.raw_value = "55.5"
 
     content = build_employee_calendar(db, worker).decode("utf-8")
 
     assert "X-WR-TIMEZONE:Asia/Yekaterinburg" in content
     assert "DTSTART;TZID=Asia/Yekaterinburg:20260522T080000" in content
-    assert "DTEND;TZID=Asia/Yekaterinburg:20260522T090000" in content
     assert "DTSTART;TZID=Asia/Yekaterinburg:20260523T200000" in content
-    assert "DTEND;TZID=Asia/Yekaterinburg:20260523T210000" in content
+    assert "DTEND;TZID=Asia/Yekaterinburg" not in content
     assert "20260523T010000" not in content
+    assert "20260525T033000" not in content
 
 
 def test_calendar_notice_appears_in_employee_calendar_with_alarm(db: Session) -> None:
