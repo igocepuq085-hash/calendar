@@ -4,24 +4,45 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Вход</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/css/app.css?v=20260523-4">
 </head>
-<body class="bg-slate-50 min-h-screen grid place-items-center">
-  <form method="post" action="/admin/login" class="bg-white border border-slate-200 rounded-lg p-6 w-full max-w-sm space-y-4 shadow-sm">
-    <h1 class="text-xl font-semibold">Вход администратора</h1>
-    {% if request.query_params.get("error") %}
-      <div class="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">Неверный логин или пароль</div>
-    {% endif %}
-    <label class="block text-sm">
-      <span class="text-slate-600">Логин</span>
-      <input name="username" class="mt-1 w-full border border-slate-300 rounded px-3 py-2">
-    </label>
-    <label class="block text-sm">
-      <span class="text-slate-600">Пароль</span>
-      <input name="password" type="password" class="mt-1 w-full border border-slate-300 rounded px-3 py-2">
-    </label>
-    <button class="w-full bg-slate-900 text-white rounded px-3 py-2">Войти</button>
-  </form>
+<body class="login-page">
+  <main class="login-shell">
+    <form id="login-form" method="post" action="/admin/login" class="login-card">
+      <div class="login-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 2v4M16 2v4M3 10h18"/><path d="M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="m9 15 2 2 4-5"/></svg>
+      </div>
+      <div>
+        <p class="login-eyebrow">Панель администратора</p>
+        <h1>Производственный календарь</h1>
+        <p class="login-subtitle">Войдите, чтобы управлять допусками, датами и календарями сотрудников.</p>
+      </div>
+
+      {% if request.query_params.get("error") %}
+        <div class="login-alert">Неверный логин или пароль.</div>
+      {% endif %}
+      {% if request.query_params.get("locked") %}
+        <div class="login-alert">Слишком много попыток входа. Подождите 5 минут и попробуйте снова.</div>
+      {% endif %}
+
+      <label class="login-field">
+        <span>Логин</span>
+        <input name="username" autocomplete="username" required autofocus>
+      </label>
+      <label class="login-field">
+        <span>Пароль</span>
+        <input name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <button id="login-submit" type="submit" class="login-submit">Войти</button>
+    </form>
+  </main>
+  <script>
+    const form = document.getElementById("login-form");
+    const button = document.getElementById("login-submit");
+    form.addEventListener("submit", () => {
+      button.disabled = true;
+      button.textContent = "Входим...";
+    });
+  </script>
 </body>
 </html>
-

@@ -5,10 +5,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.auth import COOKIE_NAME
+from app.config import get_settings
 from app.database import Base
 from app.main import app
 from app.models import Employee, EventType, KipStatus, KnowledgeCheck, MedicalCheck, NotificationSetting, ShiftType, WorkShift
-from app.routers.admin import update_medical_check
+from app.routers.admin import LOGIN_ATTEMPTS, MAX_LOGIN_ATTEMPTS, update_medical_check
 from app.routers.calendar import ICS_HEADERS
 from app.database import get_db
 from app.services.calendar_notices import create_calendar_notice
@@ -48,6 +50,44 @@ def add_shift(db: Session, employee_id: int, shift_date: date, shift_type: Shift
     db.add(shift)
     db.flush()
     return shift
+
+
+def test_admin_login_redirects_and_sets_session_cookie() -> None:
+    settings = get_settings()
+    LOGIN_ATTEMPTS.clear()
+
+    response = TestClient(app).post(
+        "/admin/login",
+        data={"username": settings.admin_username, "password": settings.admin_password},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin"
+    assert COOKIE_NAME in response.headers["set-cookie"]
+
+
+def test_admin_login_rate_limit_returns_login_page_redirect() -> None:
+    settings = get_settings()
+    LOGIN_ATTEMPTS.clear()
+    client = TestClient(app)
+
+    for _ in range(MAX_LOGIN_ATTEMPTS):
+        client.post(
+            "/admin/login",
+            data={"username": settings.admin_username, "password": "wrong"},
+            follow_redirects=False,
+        )
+
+    response = client.post(
+        "/admin/login",
+        data={"username": settings.admin_username, "password": settings.admin_password},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin/login?locked=1"
+    LOGIN_ATTEMPTS.clear()
 
 
 def test_kip_planned_on_due_date_when_shift_exists(db: Session) -> None:

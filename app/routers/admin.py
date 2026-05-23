@@ -277,7 +277,7 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
     settings = get_settings()
     key = _client_key(request, username)
     if _rate_limited(key):
-        raise HTTPException(status_code=429, detail="Too many login attempts")
+        return RedirectResponse("/admin/login?locked=1", status_code=303)
     if not hmac.compare_digest(username, settings.admin_username) or not hmac.compare_digest(password, settings.admin_password):
         _record_failed_login(key)
         return RedirectResponse("/admin/login?error=1", status_code=303)
