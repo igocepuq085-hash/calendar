@@ -171,6 +171,22 @@ def test_calendar_notice_appears_in_employee_calendar_with_alarm(db: Session) ->
     assert "TRIGGER:PT0M" in content
 
 
+def test_calendar_notice_does_not_appear_in_admin_calendar(db: Session) -> None:
+    worker = employee(db)
+    create_calendar_notice(
+        db,
+        employee_id=worker.id,
+        title="⚠️ Изменение графика",
+        description="2026-05-22: day -> night",
+        now=datetime(2026, 5, 22, 10, 0),
+    )
+    db.flush()
+
+    content = build_admin_calendar(db).decode("utf-8")
+
+    assert "Изменение графика" not in content
+
+
 def test_calendar_endpoint_disables_cache(db: Session) -> None:
     worker = employee(db)
     worker.calendar_token = "test-token"

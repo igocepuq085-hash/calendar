@@ -333,6 +333,7 @@ def _add_employee_events_to_manual_calendar(
     *,
     include_shifts: bool,
     include_employee_name: bool,
+    include_notices: bool,
 ) -> None:
     name_suffix = f" - {employee.full_name}" if include_employee_name else ""
     if include_shifts:
@@ -396,8 +397,9 @@ def _add_employee_events_to_manual_calendar(
             )
         )
 
-    for notice in _active_notices(employee):
-        lines.extend(_manual_notice_event(notice))
+    if include_notices:
+        for notice in _active_notices(employee):
+            lines.extend(_manual_notice_event(notice))
 
 
 def _add_employee_events_to_calendar(
@@ -407,6 +409,7 @@ def _add_employee_events_to_calendar(
     *,
     include_shifts: bool,
     include_employee_name: bool,
+    include_notices: bool,
 ) -> None:
     name_suffix = f" - {employee.full_name}" if include_employee_name else ""
     if include_shifts:
@@ -453,8 +456,9 @@ def _add_employee_events_to_calendar(
         _add_alarms(event, EventType.medical_check, settings)
         calendar.add_component(event)
 
-    for notice in _active_notices(employee):
-        calendar.add_component(_notice_event(notice))
+    if include_notices:
+        for notice in _active_notices(employee):
+            calendar.add_component(_notice_event(notice))
 
 
 def _manual_calendar(name: str) -> list[str]:
@@ -473,7 +477,7 @@ def build_employee_calendar(db: Session, employee: Employee) -> bytes:
     settings = list(db.scalars(select(NotificationSetting)))
     if Calendar is None:
         lines = _manual_calendar(f"Производственный календарь {employee.full_name}")
-        _add_employee_events_to_manual_calendar(lines, employee, settings, include_shifts=True, include_employee_name=False)
+        _add_employee_events_to_manual_calendar(lines, employee, settings, include_shifts=True, include_employee_name=False, include_notices=True)
         lines.append("END:VCALENDAR")
         return ("\r\n".join(lines) + "\r\n").encode("utf-8")
 
@@ -483,7 +487,7 @@ def build_employee_calendar(db: Session, employee: Employee) -> bytes:
     calendar.add("calscale", "GREGORIAN")
     calendar.add("x-wr-timezone", _calendar_tz_name())
     calendar.add("x-wr-calname", f"Производственный календарь {employee.full_name}")
-    _add_employee_events_to_calendar(calendar, employee, settings, include_shifts=True, include_employee_name=False)
+    _add_employee_events_to_calendar(calendar, employee, settings, include_shifts=True, include_employee_name=False, include_notices=True)
     return calendar.to_ical()
 
 
@@ -502,7 +506,7 @@ def build_admin_calendar(db: Session) -> bytes:
     if Calendar is None:
         lines = _manual_calendar("Производственный календарь администратора")
         for employee in employees:
-            _add_employee_events_to_manual_calendar(lines, employee, settings, include_shifts=False, include_employee_name=True)
+            _add_employee_events_to_manual_calendar(lines, employee, settings, include_shifts=False, include_employee_name=True, include_notices=False)
         lines.append("END:VCALENDAR")
         return ("\r\n".join(lines) + "\r\n").encode("utf-8")
 
@@ -513,5 +517,5 @@ def build_admin_calendar(db: Session) -> bytes:
     calendar.add("x-wr-timezone", _calendar_tz_name())
     calendar.add("x-wr-calname", "Производственный календарь администратора")
     for employee in employees:
-        _add_employee_events_to_calendar(calendar, employee, settings, include_shifts=False, include_employee_name=True)
+        _add_employee_events_to_calendar(calendar, employee, settings, include_shifts=False, include_employee_name=True, include_notices=False)
     return calendar.to_ical()
