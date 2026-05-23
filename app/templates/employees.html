@@ -8,6 +8,15 @@
   </div>
 </section>
 
+<section class="employee-search-card fade-in">
+  <label class="employee-search-label" for="employee-search">Поиск работника</label>
+  <div class="employee-search-wrap">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+    <input id="employee-search" type="search" placeholder="ФИО, табельный, должность или подразделение" autocomplete="off">
+  </div>
+  <div id="employee-search-result" class="employee-search-result">Показаны все работники</div>
+</section>
+
 <div class="status-legend">
   <span class="status-badge status-ok">Допуск в норме</span>
   <span class="status-badge status-soon">Скоро проверка</span>
@@ -19,7 +28,7 @@
   {% for card in cards %}
     {% set employee = card.employee %}
     {% set state_class = 'status-inactive' if card.state == 'inactive' else 'status-overdue' if card.state == 'danger' else 'status-soon' if card.state == 'warning' else 'status-ok' if card.state == 'success' else 'status-muted' %}
-    <a href="/admin/employees/{{ employee.id }}" class="employee-card {{ state_class }}">
+    <a href="/admin/employees/{{ employee.id }}" class="employee-card {{ state_class }}" data-employee-card data-search="{{ (employee.full_name ~ ' ' ~ (employee.tab_number or '') ~ ' ' ~ (employee.department or 'СЛХ') ~ ' ' ~ (employee.position or '') ~ ' ' ~ card.note)|lower }}">
       <div class="employee-card-top">
         <div>
           <h2>{{ employee.full_name }}</h2>
@@ -46,4 +55,31 @@
     <div class="empty-state">Работники пока не импортированы</div>
   {% endfor %}
 </section>
+
+<div id="employee-search-empty" class="empty-state employee-search-empty" hidden>Ничего не найдено. Проверьте фамилию или табельный номер.</div>
+
+<script>
+  (() => {
+    const input = document.getElementById("employee-search");
+    const result = document.getElementById("employee-search-result");
+    const empty = document.getElementById("employee-search-empty");
+    const cards = Array.from(document.querySelectorAll("[data-employee-card]"));
+    if (!input || cards.length === 0) return;
+
+    const update = () => {
+      const query = input.value.trim().toLowerCase();
+      let visible = 0;
+      cards.forEach((card) => {
+        const matched = !query || card.dataset.search.includes(query);
+        card.hidden = !matched;
+        if (matched) visible += 1;
+      });
+      result.textContent = query ? `Найдено: ${visible}` : `Показаны все работники: ${cards.length}`;
+      if (empty) empty.hidden = visible !== 0;
+    };
+
+    input.addEventListener("input", update);
+    update();
+  })();
+</script>
 {% endblock %}

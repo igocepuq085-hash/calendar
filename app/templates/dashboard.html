@@ -85,7 +85,7 @@
     <div class="event-list">
       {% for item in control_week %}
         {% set label = item.date|date_state_label %}
-        <div class="event-row">
+        <a class="event-row event-row-link" href="/admin/employees/{{ item.employee.id }}">
           <span class="event-dot {{ 'dot-red' if label == 'Просрочено' else 'dot-orange' if label == 'Скоро' else 'dot-green' }}"></span>
           <div class="event-main">
             <strong>{{ item.employee.full_name }}</strong>
@@ -95,7 +95,7 @@
             <strong>{{ item.date }}</strong>
             <span class="{{ 'text-red' if label == 'Просрочено' else 'text-orange' if label == 'Скоро' else 'text-green' }}">{{ label }}</span>
           </div>
-        </div>
+        </a>
       {% else %}
         <div class="empty-state">Нет проверок на ближайшую неделю</div>
       {% endfor %}
@@ -113,7 +113,7 @@
     <div class="event-list scroll-list">
       {% for item in control_month %}
         {% set label = item.date|date_state_label %}
-        <div class="event-row">
+        <a class="event-row event-row-link" href="/admin/employees/{{ item.employee.id }}">
           <span class="event-dot {{ 'dot-red' if label == 'Просрочено' else 'dot-orange' if label == 'Скоро' else 'dot-green' }}"></span>
           <div class="event-main">
             <strong>{{ item.employee.full_name }}</strong>
@@ -123,7 +123,7 @@
             <strong>{{ item.date }}</strong>
             <span class="{{ 'text-red' if label == 'Просрочено' else 'text-orange' if label == 'Скоро' else 'text-green' }}">{{ label }}</span>
           </div>
-        </div>
+        </a>
       {% else %}
         <div class="empty-state">Нет проверок в текущем месяце</div>
       {% endfor %}
