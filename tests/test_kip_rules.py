@@ -136,6 +136,21 @@ def test_shift_uid_is_stable_after_schedule_reimport(db: Session) -> None:
     assert first_content.split(stable_uid, 1)[1].split("@kip-calendar-service", 1)[0] == second_content.split(stable_uid, 1)[1].split("@kip-calendar-service", 1)[0]
 
 
+def test_work_shift_calendar_uses_yekaterinburg_marker_times(db: Session) -> None:
+    worker = employee(db)
+    add_shift(db, worker.id, date(2026, 5, 22), ShiftType.day)
+    add_shift(db, worker.id, date(2026, 5, 23), ShiftType.night)
+
+    content = build_employee_calendar(db, worker).decode("utf-8")
+
+    assert "X-WR-TIMEZONE:Asia/Yekaterinburg" in content
+    assert "DTSTART;TZID=Asia/Yekaterinburg:20260522T080000" in content
+    assert "DTEND;TZID=Asia/Yekaterinburg:20260522T090000" in content
+    assert "DTSTART;TZID=Asia/Yekaterinburg:20260523T200000" in content
+    assert "DTEND;TZID=Asia/Yekaterinburg:20260523T210000" in content
+    assert "20260523T010000" not in content
+
+
 def test_calendar_endpoint_disables_cache(db: Session) -> None:
     worker = employee(db)
     worker.calendar_token = "test-token"

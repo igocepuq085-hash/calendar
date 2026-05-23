@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     upload_dir: str = "uploads"
     max_upload_bytes: int = 10 * 1024 * 1024
     admin_session_ttl_seconds: int = 12 * 60 * 60
+    calendar_timezone: str = "Asia/Yekaterinburg"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

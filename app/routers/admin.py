@@ -65,6 +65,7 @@ templates.env.filters["access_state_label"] = access_state_label
 LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 MAX_LOGIN_ATTEMPTS = 5
 LOGIN_WINDOW_SECONDS = 5 * 60
+MANUAL_CONFIRM_ERROR = "Подтвердите ручное изменение даты. График смен меняется только загрузкой Excel-файла."
 
 
 def render(request: Request, template: str, context: dict, status_code: int = 200) -> HTMLResponse:
@@ -108,6 +109,10 @@ def _redirect_with_error(return_to: str, fallback: str, message: str) -> Redirec
     target = _safe_admin_return_to(return_to, fallback)
     separator = "&" if "?" in target else "?"
     return RedirectResponse(f"{target}{separator}error={quote(message)}", status_code=303)
+
+
+def _manual_date_changed(confirmed: bool, *pairs: tuple[object, object]) -> bool:
+    return not confirmed and any(old != new for old, new in pairs)
 
 
 def _upload_target(upload_dir: Path, filename: str) -> tuple[Path, str]:
@@ -543,12 +548,15 @@ def kip_recalculate(db: Session = Depends(get_db)) -> RedirectResponse:
 def kip_change_date(
     kip_id: int,
     planned_start: datetime = Form(...),
+    manual_confirm: bool = Form(False),
     return_to: str = Form("/admin/kip"),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     record = db.get(KipRecord, kip_id)
     if record is None:
         raise HTTPException(status_code=404)
+    if not manual_confirm:
+        return _redirect_with_error(return_to, "/admin/kip", MANUAL_CONFIRM_ERROR)
     try:
         change_kip_date(db, record, planned_start)
     except ValueError as exc:
@@ -562,15 +570,22 @@ def update_knowledge_check(
     check_id: int,
     previous_date: str = Form(""),
     next_date: str = Form(...),
+    manual_confirm: bool = Form(False),
     return_to: str = Form("/admin/knowledge"),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     check = db.get(KnowledgeCheck, check_id)
     if check is None:
         raise HTTPException(status_code=404)
-    old = f"{check.previous_date} -> {check.next_date}"
-    check.previous_date = _parse_date(previous_date)
-    check.next_date = _parse_date(next_date)
+    old_previous = check.previous_date
+    old_next = check.next_date
+    new_previous = _parse_date(previous_date)
+    new_next = _parse_date(next_date)
+    if _manual_date_changed(manual_confirm, (old_previous, new_previous), (old_next, new_next)):
+        return _redirect_with_error(return_to, "/admin/knowledge", MANUAL_CONFIRM_ERROR)
+    old = f"{old_previous} -> {old_next}"
+    check.previous_date = new_previous
+    check.next_date = new_next
     check.status = "planned"
     _audit(db, "knowledge_check_updated", "knowledge_checks", check.id, f"{check.check_type}: {old} -> {check.previous_date} -> {check.next_date}")
     db.commit()
@@ -582,15 +597,22 @@ def update_medical_check(
     check_id: int,
     previous_date: str = Form(""),
     next_date: str = Form(...),
+    manual_confirm: bool = Form(False),
     return_to: str = Form("/admin/medical"),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     check = db.get(MedicalCheck, check_id)
     if check is None:
         raise HTTPException(status_code=404)
-    old = f"{check.previous_date} -> {check.next_date}"
-    check.previous_date = _parse_date(previous_date)
-    check.next_date = _parse_date(next_date)
+    old_previous = check.previous_date
+    old_next = check.next_date
+    new_previous = _parse_date(previous_date)
+    new_next = _parse_date(next_date)
+    if _manual_date_changed(manual_confirm, (old_previous, new_previous), (old_next, new_next)):
+        return _redirect_with_error(return_to, "/admin/medical", MANUAL_CONFIRM_ERROR)
+    old = f"{old_previous} -> {old_next}"
+    check.previous_date = new_previous
+    check.next_date = new_next
     check.status = "planned"
     _audit(db, "medical_check_updated", "medical_checks", check.id, f"Медкомиссия: {old} -> {check.previous_date} -> {check.next_date}")
     db.commit()

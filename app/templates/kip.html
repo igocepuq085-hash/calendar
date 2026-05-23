@@ -29,6 +29,10 @@
           <form method="post" action="/admin/kip/{{ record.id }}/change-date" class="flex gap-2">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input name="planned_start" type="datetime-local" class="border border-slate-300 rounded px-2 py-1">
+            <label class="text-xs flex items-center gap-1">
+              <input type="checkbox" name="manual_confirm" value="true" required>
+              <span>Подтвердить</span>
+            </label>
             <button class="border border-slate-300 rounded px-2 py-1">Сохранить</button>
           </form>
         </td>

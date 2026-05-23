@@ -1,9 +1,11 @@
 from datetime import date, datetime, time, timedelta, timezone
 from hashlib import sha1
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.config import get_settings
 from app.models import Employee, EmployeeStatus, EventType, KipStatus, NotificationSetting, ShiftType
 
 try:
@@ -21,6 +23,8 @@ SUMMARY = {
 }
 
 CORE_KNOWLEDGE_MARKERS = ["по от", "по эб", "строп", "кран", "высот"]
+SHIFT_MARKER_DURATION = timedelta(hours=1)
+ICS_EVENT_VERSION = 2
 
 
 def _uid(prefix: str, item_id: int) -> str:
@@ -32,6 +36,38 @@ def _stable_shift_uid(employee_id: int, shift_date: date, shift_type: ShiftType)
     key = f"shift:{employee_id}:{shift_date.isoformat()}:{shift_type.value}"
     digest = sha1(key.encode()).hexdigest()[:12]
     return f"shift-{employee_id}-{shift_date.strftime('%Y%m%d')}-{shift_type.value}-{digest}@kip-calendar-service"
+
+
+def _calendar_tz_name() -> str:
+    return get_settings().calendar_timezone
+
+
+def _calendar_tz() -> ZoneInfo:
+    try:
+        return ZoneInfo(_calendar_tz_name())
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("Asia/Yekaterinburg")
+
+
+def _local_wall_datetime(value: datetime) -> datetime:
+    return value.replace(tzinfo=None).replace(tzinfo=_calendar_tz())
+
+
+def _calendar_datetime(value: datetime | None, fallback_date: date, fallback_time: time) -> datetime:
+    if value is None:
+        value = datetime.combine(fallback_date, fallback_time)
+    return _local_wall_datetime(value)
+
+
+def _shift_marker_times(shift_date: date, shift_type: ShiftType) -> tuple[datetime, datetime]:
+    marker_time = time(20, 0) if shift_type == ShiftType.night else time(8, 0)
+    start = datetime.combine(shift_date, marker_time).replace(tzinfo=_calendar_tz())
+    return start, start + SHIFT_MARKER_DURATION
+
+
+def _short_marker_times(start: datetime | None, fallback_date: date, fallback_time: time) -> tuple[datetime, datetime]:
+    local_start = _calendar_datetime(start, fallback_date, fallback_time)
+    return local_start, local_start + SHIFT_MARKER_DURATION
 
 
 def _as_utc(value: datetime | None) -> datetime:
@@ -55,7 +91,7 @@ def _event_stamp(*items: object) -> datetime:
 
 
 def _sequence(stamp: datetime) -> int:
-    return max(0, int(stamp.timestamp()))
+    return max(0, int(stamp.timestamp())) + ICS_EVENT_VERSION
 
 
 def _db_trigger(setting: NotificationSetting) -> timedelta:
@@ -212,8 +248,8 @@ def _manual_event(
         f"SEQUENCE:{_sequence(stamp)}",
     ]
     if isinstance(start, datetime):
-        lines.append(f"DTSTART:{_format_dt(start)}")
-        lines.append(f"DTEND:{_format_dt(end)}")
+        lines.append(f"DTSTART;TZID={_calendar_tz_name()}:{_format_dt(start)}")
+        lines.append(f"DTEND;TZID={_calendar_tz_name()}:{_format_dt(end)}")
     else:
         lines.append(f"DTSTART;VALUE=DATE:{_format_dt(start)}")
         lines.append(f"DTEND;VALUE=DATE:{_format_dt(end)}")
@@ -250,8 +286,7 @@ def _add_employee_events_to_manual_calendar(
                 continue
             summary_key = "day_shift" if shift.shift_type == ShiftType.day else "night_shift"
             event_type = EventType.day_shift if shift.shift_type == ShiftType.day else EventType.night_shift
-            start = shift.start_datetime or datetime.combine(shift.shift_date, time(9, 0))
-            end = shift.end_datetime or start + timedelta(hours=1)
+            start, end = _shift_marker_times(shift.shift_date, shift.shift_type)
             lines.extend(
                 _manual_event(
                     uid=_stable_shift_uid(shift.employee_id, shift.shift_date, shift.shift_type),
@@ -266,8 +301,7 @@ def _add_employee_events_to_manual_calendar(
 
     for kip in employee.kip_records:
         if kip.planned_date and kip.status in {KipStatus.planned, KipStatus.overdue}:
-            start = kip.planned_start or datetime.combine(kip.planned_date, time(9, 0))
-            end = kip.planned_end or start + timedelta(hours=1)
+            start, end = _short_marker_times(kip.planned_start, kip.planned_date, time(9, 0))
             lines.extend(
                 _manual_event(
                     uid=_uid("kip", kip.id),
@@ -320,10 +354,11 @@ def _add_employee_events_to_calendar(
     if include_shifts:
         for shift in employee.work_shifts:
             if shift.shift_type == ShiftType.day:
+                start, end = _shift_marker_times(shift.shift_date, shift.shift_type)
                 event = _timed_event(
                     f"{SUMMARY['day_shift']}{name_suffix}",
-                    shift.start_datetime,
-                    shift.end_datetime,
+                    start,
+                    end,
                     shift.shift_date,
                     _stable_shift_uid(shift.employee_id, shift.shift_date, shift.shift_type),
                     _event_stamp(shift),
@@ -331,10 +366,11 @@ def _add_employee_events_to_calendar(
                 _add_alarms(event, EventType.day_shift, settings)
                 calendar.add_component(event)
             elif shift.shift_type == ShiftType.night:
+                start, end = _shift_marker_times(shift.shift_date, shift.shift_type)
                 event = _timed_event(
                     f"{SUMMARY['night_shift']}{name_suffix}",
-                    shift.start_datetime,
-                    shift.end_datetime,
+                    start,
+                    end,
                     shift.shift_date,
                     _stable_shift_uid(shift.employee_id, shift.shift_date, shift.shift_type),
                     _event_stamp(shift),
@@ -344,7 +380,8 @@ def _add_employee_events_to_calendar(
 
     for kip in employee.kip_records:
         if kip.planned_date and kip.status in {KipStatus.planned, KipStatus.overdue}:
-            event = _timed_event(f"{SUMMARY['kip']}{name_suffix}", kip.planned_start, kip.planned_end, kip.planned_date, _uid("kip", kip.id), _event_stamp(kip))
+            start, end = _short_marker_times(kip.planned_start, kip.planned_date, time(9, 0))
+            event = _timed_event(f"{SUMMARY['kip']}{name_suffix}", start, end, kip.planned_date, _uid("kip", kip.id), _event_stamp(kip))
             _add_alarms(event, EventType.kip, settings)
             calendar.add_component(event)
 
@@ -365,6 +402,7 @@ def _manual_calendar(name: str) -> list[str]:
         "PRODID:-//KIP Calendar Service//RU",
         "VERSION:2.0",
         "CALSCALE:GREGORIAN",
+        f"X-WR-TIMEZONE:{_calendar_tz_name()}",
         f"X-WR-CALNAME:{_escape(name)}",
     ]
 
@@ -382,6 +420,7 @@ def build_employee_calendar(db: Session, employee: Employee) -> bytes:
     calendar.add("prodid", "-//KIP Calendar Service//RU")
     calendar.add("version", "2.0")
     calendar.add("calscale", "GREGORIAN")
+    calendar.add("x-wr-timezone", _calendar_tz_name())
     calendar.add("x-wr-calname", f"Производственный календарь {employee.full_name}")
     _add_employee_events_to_calendar(calendar, employee, settings, include_shifts=True, include_employee_name=False)
     return calendar.to_ical()
@@ -410,6 +449,7 @@ def build_admin_calendar(db: Session) -> bytes:
     calendar.add("prodid", "-//KIP Calendar Service//RU")
     calendar.add("version", "2.0")
     calendar.add("calscale", "GREGORIAN")
+    calendar.add("x-wr-timezone", _calendar_tz_name())
     calendar.add("x-wr-calname", "Производственный календарь администратора")
     for employee in employees:
         _add_employee_events_to_calendar(calendar, employee, settings, include_shifts=False, include_employee_name=True)

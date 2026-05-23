@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.auth import csrf_token_for_session, make_session_cookie, verify_csrf_token, verify_session_cookie
-from app.routers.admin import _safe_admin_return_to, _upload_target
+from app.routers.admin import _manual_date_changed, _safe_admin_return_to, _upload_target
 
 
 def test_admin_return_to_rejects_external_urls() -> None:
@@ -32,3 +32,9 @@ def test_admin_session_and_csrf_token_are_bound_together() -> None:
     assert verify_session_cookie(session)
     assert verify_csrf_token(session, csrf)
     assert not verify_csrf_token(session, "bad-token")
+
+
+def test_manual_date_change_requires_explicit_confirmation() -> None:
+    assert _manual_date_changed(False, ("2026-05-22", "2026-05-23"))
+    assert not _manual_date_changed(True, ("2026-05-22", "2026-05-23"))
+    assert not _manual_date_changed(False, ("2026-05-22", "2026-05-22"))

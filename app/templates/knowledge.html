@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h1 class="text-2xl font-semibold mb-6">Проверки и инструктажи</h1>
+{% if request.query_params.get("error") %}<div class="mb-4 bg-red-50 border border-red-200 text-red-800 rounded p-3 text-sm">{{ request.query_params.get("error") }}</div>{% endif %}
 <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
   <table class="w-full text-sm">
     <thead class="bg-slate-100 text-slate-600">
@@ -28,4 +29,3 @@
   </table>
 </div>
 {% endblock %}
-
