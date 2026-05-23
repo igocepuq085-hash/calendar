@@ -111,6 +111,12 @@ def _redirect_with_error(return_to: str, fallback: str, message: str) -> Redirec
     return RedirectResponse(f"{target}{separator}error={quote(message)}", status_code=303)
 
 
+def _redirect_with_success(return_to: str, fallback: str, message: str = "Сохранено") -> RedirectResponse:
+    target = _safe_admin_return_to(return_to, fallback)
+    separator = "&" if "?" in target else "?"
+    return RedirectResponse(f"{target}{separator}saved={quote(message)}", status_code=303)
+
+
 def _upload_target(upload_dir: Path, filename: str) -> tuple[Path, str]:
     original_name = Path((filename or "").replace("\\", "/")).name
     suffix = Path(original_name).suffix.lower()
@@ -565,7 +571,7 @@ def kip_change_date(
             source="manual_kip",
         )
     db.commit()
-    return RedirectResponse(_safe_admin_return_to(return_to, "/admin/kip"), status_code=303)
+    return _redirect_with_success(return_to, "/admin/kip")
 
 
 @router.post("/knowledge/{check_id}/update", dependencies=[Depends(csrf_dependency)])
@@ -597,7 +603,7 @@ def update_knowledge_check(
             source="manual_knowledge",
         )
     db.commit()
-    return RedirectResponse(_safe_admin_return_to(return_to, "/admin/knowledge"), status_code=303)
+    return _redirect_with_success(return_to, "/admin/knowledge")
 
 
 @router.post("/medical/{check_id}/update", dependencies=[Depends(csrf_dependency)])
@@ -629,7 +635,7 @@ def update_medical_check(
             source="manual_medical",
         )
     db.commit()
-    return RedirectResponse(_safe_admin_return_to(return_to, "/admin/medical"), status_code=303)
+    return _redirect_with_success(return_to, "/admin/medical")
 
 
 @router.get("/knowledge", response_class=HTMLResponse, dependencies=[Depends(admin_dependency)])

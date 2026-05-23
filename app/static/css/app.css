@@ -532,7 +532,9 @@ textarea {
   bottom: 86px;
   z-index: 80;
   display: none;
-  gap: 4px;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
   padding: 13px 16px;
   border-radius: 18px;
   color: #92400e;
@@ -548,7 +550,32 @@ textarea {
   font-size: 14px;
 }
 .dirty-save-banner span {
+  display: block;
+  margin-top: 2px;
   font-size: 12px;
+}
+.dirty-save-banner button {
+  min-height: 40px;
+  border-radius: 14px;
+  padding: 0 14px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #f59e0b, #2563eb);
+  box-shadow: 0 12px 26px rgba(245, 158, 11, .22);
+}
+.dirty-save-banner button:disabled {
+  opacity: .72;
+  cursor: wait;
+}
+.dirty-save-banner.is-error {
+  color: #991b1b;
+  background: rgba(254, 242, 242, .96);
+  border-color: rgba(239, 68, 68, .28);
+  box-shadow: 0 18px 42px rgba(239, 68, 68, .16);
+}
+.dirty-save-banner.is-error button {
+  background: linear-gradient(135deg, #ef4444, #f59e0b);
 }
 form.is-dirty {
   outline: 2px solid rgba(245, 158, 11, .45);
@@ -583,6 +610,12 @@ form.is-dirty button:not([type]) {
     display: block;
     overflow-x: auto;
     border-radius: var(--radius-lg);
+  }
+  .dirty-save-banner {
+    grid-template-columns: 1fr;
+  }
+  .dirty-save-banner button {
+    width: 100%;
   }
 }
 

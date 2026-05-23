@@ -31,8 +31,11 @@
   </div>
 
   <div id="dirty-save-banner" class="dirty-save-banner">
-    <strong>Есть несохраненные изменения</strong>
-    <span>Нажмите «Сохранить», чтобы дата попала в календарь.</span>
+    <div>
+      <strong>Есть несохраненные изменения</strong>
+      <span>Можно сохранить каждую дату отдельно или все измененные даты сразу.</span>
+    </div>
+    <button type="button" id="dirty-save-all">Сохранить все изменения</button>
   </div>
 
   <aside class="sidebar">
@@ -128,6 +131,7 @@
     (() => {
       if (window.location.pathname === "/admin/login") return;
       const banner = document.getElementById("dirty-save-banner");
+      const saveAllButton = document.getElementById("dirty-save-all");
       const watchedForms = Array.from(document.querySelectorAll("form")).filter((form) => {
         if (form.method.toLowerCase() !== "post") return false;
         return Boolean(form.querySelector("input[type='date'], input[type='datetime-local']"));
@@ -139,16 +143,63 @@
       };
       const initial = new WeakMap();
       let submitting = false;
+      let dirtyForms = [];
       const refresh = () => {
-        const dirtyForms = watchedForms.filter((form) => snapshot(form) !== initial.get(form));
+        dirtyForms = watchedForms.filter((form) => snapshot(form) !== initial.get(form));
         watchedForms.forEach((form) => form.classList.toggle("is-dirty", dirtyForms.includes(form)));
         banner.classList.toggle("is-visible", dirtyForms.length > 0);
+        banner.classList.remove("is-error");
+        if (dirtyForms.length > 0) {
+          saveAllButton.disabled = false;
+          saveAllButton.textContent = dirtyForms.length === 1 ? "Сохранить изменение" : `Сохранить все (${dirtyForms.length})`;
+        }
       };
       watchedForms.forEach((form) => {
         initial.set(form, snapshot(form));
         form.addEventListener("input", refresh);
         form.addEventListener("change", refresh);
-        form.addEventListener("submit", () => { submitting = true; });
+        form.addEventListener("submit", (event) => {
+          submitting = true;
+          form.classList.remove("is-dirty");
+          banner.classList.remove("is-visible");
+          const submitter = event.submitter;
+          if (submitter) {
+            submitter.dataset.originalText = submitter.textContent.trim();
+            submitter.textContent = "Сохраняю...";
+            submitter.disabled = true;
+          }
+        });
+      });
+      saveAllButton.addEventListener("click", async () => {
+        refresh();
+        if (dirtyForms.length === 0) return;
+        submitting = true;
+        saveAllButton.disabled = true;
+        saveAllButton.textContent = "Сохраняю...";
+        try {
+          for (const form of dirtyForms) {
+            const response = await fetch(form.action, {
+              method: form.method || "post",
+              body: new FormData(form),
+              credentials: "same-origin",
+              redirect: "follow",
+              headers: { "X-Requested-With": "fetch" },
+            });
+            if (!response.ok) {
+              throw new Error(`Ошибка сохранения: ${response.status}`);
+            }
+          }
+          const nextUrl = new URL(window.location.href);
+          nextUrl.searchParams.delete("error");
+          nextUrl.searchParams.set("saved", `Сохранено изменений: ${dirtyForms.length}`);
+          window.location.href = nextUrl.toString();
+        } catch (error) {
+          submitting = false;
+          banner.classList.add("is-error");
+          banner.querySelector("span").textContent = "Не удалось сохранить все изменения. Проверьте даты и попробуйте еще раз.";
+          saveAllButton.disabled = false;
+          saveAllButton.textContent = "Повторить сохранение";
+        }
       });
       window.addEventListener("beforeunload", (event) => {
         if (submitting || !banner.classList.contains("is-visible")) return;

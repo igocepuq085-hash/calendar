@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.database import Base
 from app.main import app
 from app.models import Employee, EventType, KipStatus, KnowledgeCheck, MedicalCheck, NotificationSetting, ShiftType, WorkShift
+from app.routers.admin import update_medical_check
 from app.routers.calendar import ICS_HEADERS
 from app.database import get_db
 from app.services.calendar_notices import create_calendar_notice
@@ -187,6 +188,28 @@ def test_calendar_notice_does_not_appear_in_admin_calendar(db: Session) -> None:
     content = build_admin_calendar(db).decode("utf-8")
 
     assert "Изменение графика" not in content
+
+
+def test_manual_medical_date_update_changes_calendar_and_redirects_saved(db: Session) -> None:
+    worker = employee(db)
+    check = MedicalCheck(employee_id=worker.id, previous_date=date(2026, 1, 1), next_date=date(2026, 7, 1))
+    db.add(check)
+    db.flush()
+
+    response = update_medical_check(
+        check.id,
+        previous_date="2026-01-01",
+        next_date="2026-08-01",
+        return_to=f"/admin/employees/{worker.id}",
+        db=db,
+    )
+
+    content = build_employee_calendar(db, worker).decode("utf-8")
+
+    assert response.headers["location"].endswith("?saved=%D0%A1%D0%BE%D1%85%D1%80%D0%B0%D0%BD%D0%B5%D0%BD%D0%BE")
+    assert "DTSTART;VALUE=DATE:20260801" in content
+    assert "DTSTART;VALUE=DATE:20260701" not in content
+    assert "SUMMARY:⚠️ Изменение медкомиссии" in content
 
 
 def test_calendar_endpoint_disables_cache(db: Session) -> None:

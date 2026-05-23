@@ -8,6 +8,7 @@
   </form>
 </div>
 {% if request.query_params.get("error") %}<div class="mb-4 bg-red-50 border border-red-200 text-red-800 rounded p-3 text-sm">{{ request.query_params.get("error") }}</div>{% endif %}
+{% if request.query_params.get("saved") %}<div class="mb-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded p-3 text-sm">{{ request.query_params.get("saved") }}</div>{% endif %}
 <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
   <table class="w-full text-sm">
     <thead class="bg-slate-100 text-slate-600"><tr><th class="p-3 text-left">Работник</th><th class="p-3">Последний</th><th class="p-3">Крайний срок</th><th class="p-3">План</th><th class="p-3">Статус</th><th class="p-3">Изменить дату</th></tr></thead>
