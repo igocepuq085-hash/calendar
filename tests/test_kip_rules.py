@@ -1,11 +1,15 @@
 from datetime import date, datetime, time
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import Base
+from app.main import app
 from app.models import Employee, EventType, KipStatus, KnowledgeCheck, MedicalCheck, NotificationSetting, ShiftType, WorkShift
+from app.routers.calendar import ICS_HEADERS
+from app.database import get_db
 from app.services.ics import build_admin_calendar, build_employee_calendar
 from app.services.kip import KIP_LATE_ERROR, change_kip_date, default_shift_times, plan_kip_record, recalculate_all_kip_records
 
@@ -112,6 +116,43 @@ def test_calendar_returns_one_common_ics_with_alarms(db: Session) -> None:
     assert "TRIGGER:-P7D" in content
     assert "TRIGGER:-P1D" in content
     assert content.count("BEGIN:VCALENDAR") == 1
+    assert "LAST-MODIFIED" in content
+    assert "SEQUENCE" in content
+
+
+def test_shift_uid_is_stable_after_schedule_reimport(db: Session) -> None:
+    worker = employee(db)
+    shift = add_shift(db, worker.id, date(2026, 5, 10))
+    first_content = build_employee_calendar(db, worker).decode("utf-8")
+    stable_uid = f"shift-{worker.id}-20260510-day"
+
+    db.delete(shift)
+    db.flush()
+    add_shift(db, worker.id, date(2026, 5, 10))
+    second_content = build_employee_calendar(db, worker).decode("utf-8")
+
+    assert stable_uid in first_content
+    assert stable_uid in second_content
+    assert first_content.split(stable_uid, 1)[1].split("@kip-calendar-service", 1)[0] == second_content.split(stable_uid, 1)[1].split("@kip-calendar-service", 1)[0]
+
+
+def test_calendar_endpoint_disables_cache(db: Session) -> None:
+    worker = employee(db)
+    worker.calendar_token = "test-token"
+    db.flush()
+
+    def override_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        response = TestClient(app).get("/cal/test-token.ics")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    for header, value in ICS_HEADERS.items():
+        assert response.headers[header] == value
 
 
 def test_kip_recalculates_after_work_schedule_changes(db: Session) -> None:

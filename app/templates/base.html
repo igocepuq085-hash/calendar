@@ -27,7 +27,7 @@
     <a href="/admin/knowledge">Проверка знаний</a>
     <a href="/admin/medical">Медкомиссии</a>
     <a href="/admin/import-errors">Ошибки импорта</a>
-    <form method="post" action="/admin/logout"><button>Выйти</button></form>
+    <form method="post" action="/admin/logout"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>Выйти</button></form>
   </div>
 
   <aside class="sidebar">

@@ -6,6 +6,7 @@
     <p class="text-sm text-slate-500">{{ employee.position or "Должность не указана" }}</p>
   </div>
   <form method="post" action="/admin/employees/{{ employee.id }}/rotate-token">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button class="bg-slate-900 text-white rounded px-3 py-2 text-sm">Перевыпустить ссылку</button>
   </form>
 </div>
@@ -15,6 +16,7 @@
     <div class="mb-3 border border-red-200 bg-red-50 text-red-800 rounded p-2 text-sm">{{ request.query_params.get("error") }}</div>
   {% endif %}
   <form method="post" action="/admin/employees/{{ employee.id }}/profile" class="grid md:grid-cols-2 xl:grid-cols-5 gap-3 text-sm items-end">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label>
       <span class="text-slate-500">Табельный номер</span>
       <input name="tab_number" value="{{ employee.tab_number or '' }}" class="mt-1 w-full border border-slate-300 rounded px-3 py-2">
@@ -55,6 +57,7 @@
         <p class="text-sm">План: <b>{{ row.planned_date or "нет смены" }}</b></p>
         <p class="text-sm mt-1"><span class="border rounded px-2 py-1 {{ row.status|kip_status_class }}">{{ row.status|kip_status_label }}</span></p>
         <form method="post" action="/admin/kip/{{ row.id }}/change-date" class="mt-3 flex gap-2 items-end">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="return_to" value="/admin/employees/{{ employee.id }}">
           <label class="text-xs flex-1">
             <span>Изменить дату и время КИП</span>
@@ -72,6 +75,7 @@
     <h2 class="font-semibold mb-3">Медкомиссии</h2>
     {% for row in medical_rows %}
       <form method="post" action="/admin/medical/{{ row.id }}/update" class="border rounded px-3 py-2 mb-2 {{ row.next_date|date_badge_class }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="return_to" value="/admin/employees/{{ employee.id }}">
         <p class="text-sm font-medium">Медицинская комиссия · {{ row.next_date|date_state_label }}</p>
         <div class="grid grid-cols-2 gap-2 mt-2">
@@ -105,6 +109,7 @@
   <div class="grid md:grid-cols-2 xl:grid-cols-3 gap-2">
     {% for row in knowledge_rows %}
       <form method="post" action="/admin/knowledge/{{ row.id }}/update" class="border rounded px-3 py-2 {{ row.next_date|date_badge_class }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="return_to" value="/admin/employees/{{ employee.id }}">
         <p class="text-sm font-medium">{{ row.check_type }}</p>
         <p class="text-xs mb-2">{{ row.next_date|date_state_label }}</p>

@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from hashlib import sha1
 
 from sqlalchemy import select
@@ -26,6 +26,36 @@ CORE_KNOWLEDGE_MARKERS = ["по от", "по эб", "строп", "кран", "�
 def _uid(prefix: str, item_id: int) -> str:
     digest = sha1(f"{prefix}:{item_id}".encode()).hexdigest()[:12]
     return f"{prefix}-{item_id}-{digest}@kip-calendar-service"
+
+
+def _stable_shift_uid(employee_id: int, shift_date: date, shift_type: ShiftType) -> str:
+    key = f"shift:{employee_id}:{shift_date.isoformat()}:{shift_type.value}"
+    digest = sha1(key.encode()).hexdigest()[:12]
+    return f"shift-{employee_id}-{shift_date.strftime('%Y%m%d')}-{shift_type.value}-{digest}@kip-calendar-service"
+
+
+def _as_utc(value: datetime | None) -> datetime:
+    if value is None:
+        return datetime.now(timezone.utc)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _event_stamp(*items: object) -> datetime:
+    stamps: list[datetime] = []
+    for item in items:
+        updated_at = getattr(item, "updated_at", None)
+        created_at = getattr(item, "created_at", None)
+        if updated_at is not None:
+            stamps.append(_as_utc(updated_at))
+        elif created_at is not None:
+            stamps.append(_as_utc(created_at))
+    return max(stamps) if stamps else datetime.now(timezone.utc)
+
+
+def _sequence(stamp: datetime) -> int:
+    return max(0, int(stamp.timestamp()))
 
 
 def _db_trigger(setting: NotificationSetting) -> timedelta:
@@ -81,16 +111,23 @@ def _add_alarms(event: Event, event_type: EventType, settings: list[Notification
         event.add_component(alarm)
 
 
-def _all_day_event(summary: str, start_date: date, uid: str) -> Event:
+def _add_event_metadata(event: Event, stamp: datetime) -> None:
+    event.add("dtstamp", datetime.now(timezone.utc))
+    event.add("last-modified", stamp)
+    event.add("sequence", _sequence(stamp))
+
+
+def _all_day_event(summary: str, start_date: date, uid: str, stamp: datetime) -> Event:
     event = Event()
     event.add("uid", uid)
     event.add("summary", summary)
     event.add("dtstart", start_date)
     event.add("dtend", start_date + timedelta(days=1))
+    _add_event_metadata(event, stamp)
     return event
 
 
-def _timed_event(summary: str, start: datetime | None, end: datetime | None, fallback_date: date, uid: str) -> Event:
+def _timed_event(summary: str, start: datetime | None, end: datetime | None, fallback_date: date, uid: str, stamp: datetime) -> Event:
     if start is None:
         start = datetime.combine(fallback_date, time(9, 0))
     if end is None or end <= start:
@@ -100,6 +137,7 @@ def _timed_event(summary: str, start: datetime | None, end: datetime | None, fal
     event.add("summary", summary)
     event.add("dtstart", start)
     event.add("dtend", end)
+    _add_event_metadata(event, stamp)
     return event
 
 
@@ -107,6 +145,10 @@ def _format_dt(value: date | datetime) -> str:
     if isinstance(value, datetime):
         return value.strftime("%Y%m%dT%H%M%S")
     return value.strftime("%Y%m%d")
+
+
+def _format_utc_dt(value: datetime) -> str:
+    return _as_utc(value).strftime("%Y%m%dT%H%M%SZ")
 
 
 def _escape(value: str) -> str:
@@ -158,8 +200,17 @@ def _manual_event(
     event_type: EventType,
     settings: list[NotificationSetting],
     subtype: str | None = None,
+    stamp: datetime | None = None,
 ) -> list[str]:
-    lines = ["BEGIN:VEVENT", f"UID:{uid}", f"SUMMARY:{_escape(summary)}"]
+    stamp = stamp or datetime.now(timezone.utc)
+    lines = [
+        "BEGIN:VEVENT",
+        f"UID:{uid}",
+        f"SUMMARY:{_escape(summary)}",
+        f"DTSTAMP:{_format_utc_dt(datetime.now(timezone.utc))}",
+        f"LAST-MODIFIED:{_format_utc_dt(stamp)}",
+        f"SEQUENCE:{_sequence(stamp)}",
+    ]
     if isinstance(start, datetime):
         lines.append(f"DTSTART:{_format_dt(start)}")
         lines.append(f"DTEND:{_format_dt(end)}")
@@ -203,12 +254,13 @@ def _add_employee_events_to_manual_calendar(
             end = shift.end_datetime or start + timedelta(hours=1)
             lines.extend(
                 _manual_event(
-                    uid=_uid("shift", shift.id),
+                    uid=_stable_shift_uid(shift.employee_id, shift.shift_date, shift.shift_type),
                     summary=f"{SUMMARY[summary_key]}{name_suffix}",
                     start=start,
                     end=end,
                     event_type=event_type,
                     settings=settings,
+                    stamp=_event_stamp(shift),
                 )
             )
 
@@ -224,6 +276,7 @@ def _add_employee_events_to_manual_calendar(
                     end=end,
                     event_type=EventType.kip,
                     settings=settings,
+                    stamp=_event_stamp(kip),
                 )
             )
 
@@ -237,6 +290,7 @@ def _add_employee_events_to_manual_calendar(
                 event_type=EventType.knowledge_check,
                 settings=settings,
                 subtype=check.check_type,
+                stamp=_event_stamp(check),
             )
         )
 
@@ -249,6 +303,7 @@ def _add_employee_events_to_manual_calendar(
                 end=check.next_date + timedelta(days=1),
                 event_type=EventType.medical_check,
                 settings=settings,
+                stamp=_event_stamp(check),
             )
         )
 
@@ -265,27 +320,41 @@ def _add_employee_events_to_calendar(
     if include_shifts:
         for shift in employee.work_shifts:
             if shift.shift_type == ShiftType.day:
-                event = _timed_event(f"{SUMMARY['day_shift']}{name_suffix}", shift.start_datetime, shift.end_datetime, shift.shift_date, _uid("shift", shift.id))
+                event = _timed_event(
+                    f"{SUMMARY['day_shift']}{name_suffix}",
+                    shift.start_datetime,
+                    shift.end_datetime,
+                    shift.shift_date,
+                    _stable_shift_uid(shift.employee_id, shift.shift_date, shift.shift_type),
+                    _event_stamp(shift),
+                )
                 _add_alarms(event, EventType.day_shift, settings)
                 calendar.add_component(event)
             elif shift.shift_type == ShiftType.night:
-                event = _timed_event(f"{SUMMARY['night_shift']}{name_suffix}", shift.start_datetime, shift.end_datetime, shift.shift_date, _uid("shift", shift.id))
+                event = _timed_event(
+                    f"{SUMMARY['night_shift']}{name_suffix}",
+                    shift.start_datetime,
+                    shift.end_datetime,
+                    shift.shift_date,
+                    _stable_shift_uid(shift.employee_id, shift.shift_date, shift.shift_type),
+                    _event_stamp(shift),
+                )
                 _add_alarms(event, EventType.night_shift, settings)
                 calendar.add_component(event)
 
     for kip in employee.kip_records:
         if kip.planned_date and kip.status in {KipStatus.planned, KipStatus.overdue}:
-            event = _timed_event(f"{SUMMARY['kip']}{name_suffix}", kip.planned_start, kip.planned_end, kip.planned_date, _uid("kip", kip.id))
+            event = _timed_event(f"{SUMMARY['kip']}{name_suffix}", kip.planned_start, kip.planned_end, kip.planned_date, _uid("kip", kip.id), _event_stamp(kip))
             _add_alarms(event, EventType.kip, settings)
             calendar.add_component(event)
 
     for check in employee.knowledge_checks:
-        event = _all_day_event(f"{SUMMARY['knowledge_check']} - {check.check_type}{name_suffix}", check.next_date, _uid("knowledge", check.id))
+        event = _all_day_event(f"{SUMMARY['knowledge_check']} - {check.check_type}{name_suffix}", check.next_date, _uid("knowledge", check.id), _event_stamp(check))
         _add_alarms(event, EventType.knowledge_check, settings, check.check_type)
         calendar.add_component(event)
 
     for check in employee.medical_checks:
-        event = _all_day_event(f"{SUMMARY['medical_check']}{name_suffix}", check.next_date, _uid("medical", check.id))
+        event = _all_day_event(f"{SUMMARY['medical_check']}{name_suffix}", check.next_date, _uid("medical", check.id), _event_stamp(check))
         _add_alarms(event, EventType.medical_check, settings)
         calendar.add_component(event)
 

@@ -10,6 +10,14 @@ from app.services.ics import build_admin_calendar, build_employee_calendar
 router = APIRouter()
 
 
+ICS_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+    "X-Accel-Buffering": "no",
+}
+
+
 @router.get("/cal/{token}.ics")
 def calendar(token: str, db: Session = Depends(get_db)) -> Response:
     employee = db.scalar(select(Employee).where(Employee.calendar_token == token))
@@ -19,7 +27,7 @@ def calendar(token: str, db: Session = Depends(get_db)) -> Response:
     return Response(
         content=content,
         media_type="text/calendar; charset=utf-8",
-        headers={"Content-Disposition": f'inline; filename="{employee.id}.ics"'},
+        headers={**ICS_HEADERS, "Content-Disposition": f'inline; filename="{employee.id}.ics"'},
     )
 
 
@@ -31,5 +39,5 @@ def admin_calendar(token: str, db: Session = Depends(get_db)) -> Response:
     return Response(
         content=content,
         media_type="text/calendar; charset=utf-8",
-        headers={"Content-Disposition": 'inline; filename="admin.ics"'},
+        headers={**ICS_HEADERS, "Content-Disposition": 'inline; filename="admin.ics"'},
     )

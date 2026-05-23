@@ -3,6 +3,7 @@
 <div class="flex items-center justify-between gap-4 mb-6">
   <h1 class="text-2xl font-semibold">КИП</h1>
   <form method="post" action="/admin/kip/recalculate">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button class="bg-slate-900 text-white rounded px-3 py-2 text-sm">Пересчитать по графику</button>
   </form>
 </div>
@@ -26,6 +27,7 @@
         </td>
         <td class="p-3">
           <form method="post" action="/admin/kip/{{ record.id }}/change-date" class="flex gap-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input name="planned_start" type="datetime-local" class="border border-slate-300 rounded px-2 py-1">
             <button class="border border-slate-300 rounded px-2 py-1">Сохранить</button>
           </form>

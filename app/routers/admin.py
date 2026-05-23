@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import calendar
+import hmac
+import secrets
 import shutil
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -11,7 +15,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.auth import COOKIE_NAME, admin_dependency, make_session_cookie
+from app.auth import COOKIE_NAME, admin_dependency, csrf_dependency, csrf_token_for_session, make_session_cookie
 from app.config import get_admin_calendar_token, get_settings
 from app.database import get_db
 from app.importer import confirm_import, create_uploaded_file, detect_and_parse
@@ -58,12 +62,76 @@ templates.env.filters["access_card_class"] = access_card_class
 templates.env.filters["access_badge_class"] = access_badge_class
 templates.env.filters["access_state_label"] = access_state_label
 
+LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+MAX_LOGIN_ATTEMPTS = 5
+LOGIN_WINDOW_SECONDS = 5 * 60
+
 
 def render(request: Request, template: str, context: dict, status_code: int = 200) -> HTMLResponse:
     context.setdefault("request", request)
     context.setdefault("settings", get_settings())
     context.setdefault("admin_calendar_url", f"{get_settings().base_url}/cal/admin/{get_admin_calendar_token()}.ics")
+    context.setdefault("csrf_token", csrf_token_for_session(request.cookies.get(COOKIE_NAME)))
     return templates.TemplateResponse(request, template, context, status_code=status_code)
+
+
+def _client_key(request: Request, username: str) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    ip = forwarded_for.split(",", 1)[0].strip() or (request.client.host if request.client else "unknown")
+    return f"{ip}:{username}"
+
+
+def _rate_limited(key: str) -> bool:
+    now = time.monotonic()
+    attempts = [stamp for stamp in LOGIN_ATTEMPTS.get(key, []) if now - stamp <= LOGIN_WINDOW_SECONDS]
+    LOGIN_ATTEMPTS[key] = attempts
+    return len(attempts) >= MAX_LOGIN_ATTEMPTS
+
+
+def _record_failed_login(key: str) -> None:
+    LOGIN_ATTEMPTS.setdefault(key, []).append(time.monotonic())
+
+
+def _clear_failed_logins(key: str) -> None:
+    LOGIN_ATTEMPTS.pop(key, None)
+
+
+def _safe_admin_return_to(value: str | None, fallback: str) -> str:
+    if not value:
+        return fallback
+    if value.startswith("/admin") and not value.startswith("//") and "://" not in value:
+        return value
+    return fallback
+
+
+def _redirect_with_error(return_to: str, fallback: str, message: str) -> RedirectResponse:
+    target = _safe_admin_return_to(return_to, fallback)
+    separator = "&" if "?" in target else "?"
+    return RedirectResponse(f"{target}{separator}error={quote(message)}", status_code=303)
+
+
+def _upload_target(upload_dir: Path, filename: str) -> tuple[Path, str]:
+    original_name = Path((filename or "").replace("\\", "/")).name
+    suffix = Path(original_name).suffix.lower()
+    if suffix != ".xlsx":
+        raise HTTPException(status_code=400, detail="Можно загружать только Excel-файлы .xlsx")
+    safe_name = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{secrets.token_hex(8)}{suffix}"
+    target = (upload_dir / safe_name).resolve()
+    upload_root = upload_dir.resolve()
+    if upload_root not in target.parents:
+        raise HTTPException(status_code=400, detail="Некорректное имя файла")
+    return target, original_name
+
+
+def _validate_upload_size(file: UploadFile) -> None:
+    max_bytes = get_settings().max_upload_bytes
+    file.file.seek(0, 2)
+    size = file.file.tell()
+    file.file.seek(0)
+    if size <= 0:
+        raise HTTPException(status_code=400, detail="Пустой файл")
+    if size > max_bytes:
+        raise HTTPException(status_code=413, detail=f"Файл слишком большой. Максимум {max_bytes // 1024 // 1024} МБ")
 
 
 def _parse_date(value: str | None) -> date | None:
@@ -198,19 +266,32 @@ def login_page(request: Request) -> HTMLResponse:
 
 
 @router.post("/login")
-def login(username: str = Form(...), password: str = Form(...)) -> RedirectResponse:
+def login(request: Request, username: str = Form(...), password: str = Form(...)) -> RedirectResponse:
     settings = get_settings()
-    if username != settings.admin_username or password != settings.admin_password:
+    key = _client_key(request, username)
+    if _rate_limited(key):
+        raise HTTPException(status_code=429, detail="Too many login attempts")
+    if not hmac.compare_digest(username, settings.admin_username) or not hmac.compare_digest(password, settings.admin_password):
+        _record_failed_login(key)
         return RedirectResponse("/admin/login?error=1", status_code=303)
+    _clear_failed_logins(key)
     response = RedirectResponse("/admin", status_code=303)
-    response.set_cookie(COOKIE_NAME, make_session_cookie(username), httponly=True, samesite="lax")
+    response.set_cookie(
+        COOKIE_NAME,
+        make_session_cookie(username),
+        httponly=True,
+        secure=settings.base_url.startswith("https://"),
+        samesite="lax",
+        max_age=settings.admin_session_ttl_seconds,
+        path="/admin",
+    )
     return response
 
 
-@router.post("/logout")
+@router.post("/logout", dependencies=[Depends(csrf_dependency)])
 def logout() -> RedirectResponse:
     response = RedirectResponse("/admin/login", status_code=303)
-    response.delete_cookie(COOKIE_NAME)
+    response.delete_cookie(COOKIE_NAME, path="/admin")
     return response
 
 
@@ -317,7 +398,7 @@ def employee_card(employee_id: int, request: Request, db: Session = Depends(get_
     )
 
 
-@router.post("/employees/{employee_id}/profile", dependencies=[Depends(admin_dependency)])
+@router.post("/employees/{employee_id}/profile", dependencies=[Depends(csrf_dependency)])
 def update_employee_profile(
     employee_id: int,
     tab_number: str = Form(""),
@@ -353,7 +434,7 @@ def update_employee_profile(
     return RedirectResponse(f"/admin/employees/{employee_id}", status_code=303)
 
 
-@router.post("/employees/{employee_id}/rotate-token", dependencies=[Depends(admin_dependency)])
+@router.post("/employees/{employee_id}/rotate-token", dependencies=[Depends(csrf_dependency)])
 def rotate_token(employee_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
     employee = db.get(Employee, employee_id)
     if employee is None:
@@ -369,15 +450,20 @@ def uploads(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     return render(request, "uploads.html", {"uploads": items})
 
 
-@router.post("/uploads/preview", dependencies=[Depends(admin_dependency)])
+@router.post("/uploads/preview", dependencies=[Depends(csrf_dependency)])
 def upload_preview(file: UploadFile = File(...), db: Session = Depends(get_db)) -> RedirectResponse:
     upload_dir = Path(get_settings().upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
-    target = upload_dir / f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{file.filename}"
+    target, original_name = _upload_target(upload_dir, file.filename or "")
+    _validate_upload_size(file)
     with target.open("wb") as out:
         shutil.copyfileobj(file.file, out)
-    result = detect_and_parse(target)
-    upload = create_uploaded_file(db, original_filename=file.filename, stored_path=str(target), result=result)
+    try:
+        result = detect_and_parse(target)
+    except Exception as exc:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Файл не удалось прочитать как Excel .xlsx") from exc
+    upload = create_uploaded_file(db, original_filename=original_name, stored_path=str(target), result=result)
     db.commit()
     return RedirectResponse(f"/admin/uploads/{upload.id}/preview", status_code=303)
 
@@ -391,7 +477,7 @@ def upload_preview_page(upload_id: int, request: Request, db: Session = Depends(
     return render(request, "upload_preview.html", {"upload": upload, "errors": errors})
 
 
-@router.post("/uploads/{upload_id}/confirm", dependencies=[Depends(admin_dependency)])
+@router.post("/uploads/{upload_id}/confirm", dependencies=[Depends(csrf_dependency)])
 def upload_confirm(upload_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
     upload = db.get(UploadedFile, upload_id)
     if upload is None:
@@ -446,14 +532,14 @@ def kip_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     return render(request, "kip.html", {"records": rows, "error_text": KIP_LATE_ERROR})
 
 
-@router.post("/kip/recalculate", dependencies=[Depends(admin_dependency)])
+@router.post("/kip/recalculate", dependencies=[Depends(csrf_dependency)])
 def kip_recalculate(db: Session = Depends(get_db)) -> RedirectResponse:
     recalculate_all_kip_records(db)
     db.commit()
     return RedirectResponse("/admin/kip", status_code=303)
 
 
-@router.post("/kip/{kip_id}/change-date", dependencies=[Depends(admin_dependency)])
+@router.post("/kip/{kip_id}/change-date", dependencies=[Depends(csrf_dependency)])
 def kip_change_date(
     kip_id: int,
     planned_start: datetime = Form(...),
@@ -466,12 +552,12 @@ def kip_change_date(
     try:
         change_kip_date(db, record, planned_start)
     except ValueError as exc:
-        return RedirectResponse(f"{return_to}?error={str(exc)}", status_code=303)
+        return _redirect_with_error(return_to, "/admin/kip", str(exc))
     db.commit()
-    return RedirectResponse(return_to, status_code=303)
+    return RedirectResponse(_safe_admin_return_to(return_to, "/admin/kip"), status_code=303)
 
 
-@router.post("/knowledge/{check_id}/update", dependencies=[Depends(admin_dependency)])
+@router.post("/knowledge/{check_id}/update", dependencies=[Depends(csrf_dependency)])
 def update_knowledge_check(
     check_id: int,
     previous_date: str = Form(""),
@@ -488,10 +574,10 @@ def update_knowledge_check(
     check.status = "planned"
     _audit(db, "knowledge_check_updated", "knowledge_checks", check.id, f"{check.check_type}: {old} -> {check.previous_date} -> {check.next_date}")
     db.commit()
-    return RedirectResponse(return_to, status_code=303)
+    return RedirectResponse(_safe_admin_return_to(return_to, "/admin/knowledge"), status_code=303)
 
 
-@router.post("/medical/{check_id}/update", dependencies=[Depends(admin_dependency)])
+@router.post("/medical/{check_id}/update", dependencies=[Depends(csrf_dependency)])
 def update_medical_check(
     check_id: int,
     previous_date: str = Form(""),
@@ -508,7 +594,7 @@ def update_medical_check(
     check.status = "planned"
     _audit(db, "medical_check_updated", "medical_checks", check.id, f"Медкомиссия: {old} -> {check.previous_date} -> {check.next_date}")
     db.commit()
-    return RedirectResponse(return_to, status_code=303)
+    return RedirectResponse(_safe_admin_return_to(return_to, "/admin/medical"), status_code=303)
 
 
 @router.get("/knowledge", response_class=HTMLResponse, dependencies=[Depends(admin_dependency)])
@@ -540,7 +626,7 @@ def notifications(request: Request, db: Session = Depends(get_db)) -> HTMLRespon
     return render(request, "notifications.html", {"settings_rows": settings, "event_types": event_types})
 
 
-@router.post("/notifications", dependencies=[Depends(admin_dependency)])
+@router.post("/notifications", dependencies=[Depends(csrf_dependency)])
 def add_notification(
     event_type: EventType = Form(...),
     amount: int = Form(...),
@@ -553,7 +639,7 @@ def add_notification(
     return RedirectResponse("/admin/notifications", status_code=303)
 
 
-@router.post("/notifications/{setting_id}/delete", dependencies=[Depends(admin_dependency)])
+@router.post("/notifications/{setting_id}/delete", dependencies=[Depends(csrf_dependency)])
 def delete_notification(setting_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
     setting = db.get(NotificationSetting, setting_id)
     if setting:
