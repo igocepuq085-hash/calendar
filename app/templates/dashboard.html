@@ -21,19 +21,19 @@
 <section class="kpi-grid fade-in">
   <a href="/admin/kip" class="kpi-card kpi-blue">
     <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="5" width="18" height="16" rx="2"/><path d="m9 15 2 2 4-5"/></svg></div>
-    <div class="kpi-number">{{ kip_soon|length + kip_overdue|length }}</div>
+    <div class="kpi-number">{{ kip_soon_count + kip_overdue_count }}</div>
     <div class="kpi-label">КИП</div>
-    <div class="kpi-trend">скоро: {{ kip_soon|length }} · просрочено: {{ kip_overdue|length }}</div>
+    <div class="kpi-trend">скоро: {{ kip_soon_count }} · просрочено: {{ kip_overdue_count }}</div>
   </a>
   <a href="/admin/knowledge" class="kpi-card kpi-purple">
     <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M4 4v15.5"/><path d="M8 4h11a1 1 0 0 1 1 1v16H8a4 4 0 0 1-4-4V8a4 4 0 0 1 4-4Z"/></svg></div>
-    <div class="kpi-number">{{ knowledge_month|length }}</div>
+    <div class="kpi-number">{{ knowledge_month_count }}</div>
     <div class="kpi-label">Проверки знаний</div>
     <div class="kpi-trend">в текущем месяце</div>
   </a>
   <a href="/admin/medical" class="kpi-card kpi-green">
     <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 2v4M16 2v4"/><rect x="4" y="4" width="16" height="18" rx="2"/><path d="M12 10v6M9 13h6"/></svg></div>
-    <div class="kpi-number">{{ medical_soon|length }}</div>
+    <div class="kpi-number">{{ medical_soon_count }}</div>
     <div class="kpi-label">Медкомиссии</div>
     <div class="kpi-trend">в ближайшие 14 дней</div>
   </a>
@@ -80,7 +80,7 @@
         <div class="mini-title">Проверки ближайшей недели</div>
         <div class="mini-subtitle">до {{ next_7 }}</div>
       </div>
-      <span class="count-badge purple">{{ control_week|length }} событий</span>
+      <span class="count-badge purple">{{ control_week_count }} событий</span>
     </div>
     <div class="event-list">
       {% for item in control_week %}
@@ -108,7 +108,7 @@
         <div class="mini-title">Проверки текущего месяца</div>
         <div class="mini-subtitle">{{ month_start }} - {{ month_end }}</div>
       </div>
-      <span class="count-badge green">{{ control_month|length }} событий</span>
+      <span class="count-badge green">{{ control_month_count }} событий</span>
     </div>
     <div class="event-list scroll-list">
       {% for item in control_month %}

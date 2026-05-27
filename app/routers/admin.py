@@ -193,6 +193,22 @@ def _control_events(db: Session, start: date, end: date, limit: int = 100) -> li
     return events[:limit]
 
 
+def _control_events_count(db: Session, start: date, end: date) -> int:
+    knowledge_count = db.scalar(
+        select(func.count())
+        .select_from(KnowledgeCheck)
+        .join(KnowledgeCheck.employee)
+        .where(KnowledgeCheck.next_date.between(start, end), Employee.status == EmployeeStatus.active)
+    ) or 0
+    medical_count = db.scalar(
+        select(func.count())
+        .select_from(MedicalCheck)
+        .join(MedicalCheck.employee)
+        .where(MedicalCheck.next_date.between(start, end), Employee.status == EmployeeStatus.active)
+    ) or 0
+    return knowledge_count + medical_count
+
+
 def _schedule_until_by_employee(db: Session) -> dict[int, date]:
     return {
         employee_id: max_date
@@ -316,6 +332,30 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     next_14 = today + timedelta(days=14)
     control_month = _control_events(db, month_start, month_end, limit=120)
     control_week = _control_events(db, today, next_7, limit=80)
+    kip_soon_count = db.scalar(
+        select(func.count())
+        .select_from(KipRecord)
+        .join(KipRecord.employee)
+        .where(KipRecord.due_date.between(today, next_14), Employee.status == EmployeeStatus.active)
+    ) or 0
+    kip_overdue_count = db.scalar(
+        select(func.count())
+        .select_from(KipRecord)
+        .join(KipRecord.employee)
+        .where(KipRecord.status == KipStatus.overdue, Employee.status == EmployeeStatus.active)
+    ) or 0
+    knowledge_month_count = db.scalar(
+        select(func.count())
+        .select_from(KnowledgeCheck)
+        .join(KnowledgeCheck.employee)
+        .where(KnowledgeCheck.next_date.between(month_start, month_end), Employee.status == EmployeeStatus.active)
+    ) or 0
+    medical_soon_count = db.scalar(
+        select(func.count())
+        .select_from(MedicalCheck)
+        .join(MedicalCheck.employee)
+        .where(MedicalCheck.next_date.between(today, next_14), Employee.status == EmployeeStatus.active)
+    ) or 0
     schedule_until = _schedule_until_by_employee(db)
     kip_conflicts = db.scalars(
         select(KipRecord)
@@ -335,6 +375,12 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     )
     context = {
         "access_summary": _access_summary(db),
+        "kip_soon_count": kip_soon_count,
+        "kip_overdue_count": kip_overdue_count,
+        "knowledge_month_count": knowledge_month_count,
+        "medical_soon_count": medical_soon_count,
+        "control_week_count": _control_events_count(db, today, next_7),
+        "control_month_count": _control_events_count(db, month_start, month_end),
         "kip_soon": db.scalars(select(KipRecord).join(KipRecord.employee).options(selectinload(KipRecord.employee)).where(KipRecord.due_date.between(today, next_14), Employee.status == EmployeeStatus.active).order_by(KipRecord.due_date, Employee.full_name).limit(20)).all(),
         "kip_overdue": db.scalars(select(KipRecord).join(KipRecord.employee).options(selectinload(KipRecord.employee)).where(KipRecord.status == KipStatus.overdue, Employee.status == EmployeeStatus.active).order_by(KipRecord.due_date, Employee.full_name).limit(20)).all(),
         "kip_conflicts": real_kip_conflicts[:20],

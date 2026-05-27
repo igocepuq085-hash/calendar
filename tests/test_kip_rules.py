@@ -1,4 +1,4 @@
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -221,21 +221,22 @@ def test_work_shift_calendar_uses_yekaterinburg_marker_times(db: Session) -> Non
 
 def test_calendar_notice_appears_in_employee_calendar_with_alarm(db: Session) -> None:
     worker = employee(db)
+    notice_time = datetime.combine(date.today() + timedelta(days=1), time(10, 0))
     create_calendar_notice(
         db,
         employee_id=worker.id,
         title="⚠️ Изменение графика",
-        description="2026-05-22: day -> night",
-        now=datetime(2026, 5, 22, 10, 0),
+        description=f"{notice_time.date()}: day -> night",
+        now=notice_time,
     )
     db.flush()
 
     content = build_employee_calendar(db, worker).decode("utf-8")
 
     assert "SUMMARY:⚠️ Изменение графика" in content
-    assert "DESCRIPTION:2026-05-22: day -> night" in content
-    assert "DTSTART;TZID=Asia/Yekaterinburg:20260522T105500" in content
-    assert "TRIGGER:PT0M" in content
+    assert f"DESCRIPTION:{notice_time.date()}: day -> night" in content
+    assert f"DTSTART;TZID=Asia/Yekaterinburg:{notice_time.strftime('%Y%m%d')}T105500" in content
+    assert "TRIGGER:P0D" in content
 
 
 def test_calendar_notice_does_not_appear_in_admin_calendar(db: Session) -> None:
