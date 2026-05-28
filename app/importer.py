@@ -9,9 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    Employee,
+    EmployeeStatus,
     ImportErrorRecord,
     KnowledgeCheck,
-    KipRecord,
     MedicalCheck,
     UploadedFile,
     UploadedFileStatus,
@@ -19,8 +20,10 @@ from app.models import (
 )
 from app.parsers import PARSERS, ParseResult
 from app.services.calendar_notices import cleanup_expired_calendar_notices, create_calendar_notice
-from app.services.kip import recalculate_all_kip_records, upsert_latest_kip_record
 from app.services.people import get_or_create_employee
+
+
+CONTROL_EVENT_KINDS = {"knowledge", "medical"}
 
 
 def detect_and_parse(path: str | Path) -> ParseResult:
@@ -69,6 +72,7 @@ def create_uploaded_file(db: Session, *, original_filename: str, stored_path: st
 def confirm_import(db: Session, upload: UploadedFile) -> int:
     result = detect_and_parse(upload.stored_path)
     count = 0
+    detected_kinds = set(result.parser_name.split("+")) if result.parser_name != "unknown" else set()
     imported_kinds: set[str] = set()
     prepared: list[tuple[dict[str, Any], Any, str]] = []
     for row in result.rows:
@@ -82,13 +86,14 @@ def confirm_import(db: Session, upload: UploadedFile) -> int:
         kind = row.get("kind", result.parser_name)
         imported_kinds.add(kind)
         prepared.append((row, employee, kind))
+    import_scope = imported_kinds | detected_kinds
 
-    old_knowledge = _knowledge_snapshot(db, prepared) if "knowledge" in imported_kinds else {}
-    old_medical = _medical_snapshot(db, prepared) if "medical" in imported_kinds else {}
-    old_kip = _kip_snapshot(db) if "work_schedule" in imported_kinds else {}
+    old_knowledge = _knowledge_snapshot(db, prepared) if "knowledge" in import_scope else {}
+    old_medical = _medical_snapshot(db, prepared) if "medical" in import_scope else {}
     schedule_changes: dict[int, list[str]] = {}
     cleanup_expired_calendar_notices(db)
-    _replace_imported_employee_events(db, prepared, imported_kinds)
+    _sync_control_roster(db, prepared, import_scope)
+    _replace_imported_employee_events(db, prepared, import_scope)
 
     for row, employee, kind in prepared:
         if kind == "work_schedule":
@@ -120,15 +125,6 @@ def confirm_import(db: Session, upload: UploadedFile) -> int:
             schedule_change = _work_shift_change_message(old_shift, row)
             if schedule_change:
                 schedule_changes.setdefault(employee.id, []).append(schedule_change)
-            count += 1
-        elif kind == "kip_journal":
-            upsert_latest_kip_record(
-                db,
-                employee_id=employee.id,
-                last_kip_date=row["last_kip_date"],
-                source=upload.original_filename,
-                raw_value=row.get("raw_value"),
-            )
             count += 1
         elif kind == "knowledge":
             old_next = old_knowledge.get((employee.id, row["check_type"]))
@@ -171,11 +167,6 @@ def confirm_import(db: Session, upload: UploadedFile) -> int:
     upload.events_created = count
     upload.errors_count = len(result.errors)
     _create_schedule_change_notices(db, schedule_changes, upload.original_filename)
-    if "work_schedule" in imported_kinds:
-        recalculate_all_kip_records(db)
-        _notice_kip_changes_after_schedule(db, old_kip)
-    if "kip_journal" in imported_kinds:
-        cleanup_kip_records(db)
     db.flush()
     return count
 
@@ -197,9 +188,26 @@ def _medical_snapshot(db: Session, prepared: list[tuple[dict[str, Any], Any, str
     return {row.employee_id: row.next_date for row in rows}
 
 
-def _kip_snapshot(db: Session) -> dict[int, tuple[Any, Any]]:
-    rows = db.scalars(select(KipRecord)).all()
-    return {row.id: (row.planned_date, row.planned_start) for row in rows}
+def _control_employee_ids(prepared: list[tuple[dict[str, Any], Any, str]]) -> set[int]:
+    return {employee.id for _, employee, kind in prepared if kind in CONTROL_EVENT_KINDS}
+
+
+def _sync_control_roster(db: Session, prepared: list[tuple[dict[str, Any], Any, str]], imported_kinds: set[str]) -> None:
+    if not CONTROL_EVENT_KINDS.issubset(imported_kinds):
+        return
+    employee_ids = _control_employee_ids(prepared)
+    if not employee_ids:
+        return
+    for employee in db.scalars(select(Employee).where(Employee.id.in_(employee_ids))):
+        employee.department = employee.department or "СЛХ"
+    stale_rows = db.scalars(
+        select(Employee).where(
+            Employee.status == EmployeeStatus.active,
+            Employee.id.not_in(employee_ids),
+        )
+    ).all()
+    for employee in stale_rows:
+        employee.status = EmployeeStatus.inactive
 
 
 def _work_shift_change_message(old_shift: WorkShift | None, row: dict[str, Any]) -> str | None:
@@ -235,68 +243,22 @@ def _create_schedule_change_notices(db: Session, schedule_changes: dict[int, lis
         )
 
 
-def _notice_kip_changes_after_schedule(db: Session, old_kip: dict[int, tuple[Any, Any]]) -> None:
-    if not old_kip:
-        return
-    rows = db.scalars(select(KipRecord)).all()
-    for row in rows:
-        previous = old_kip.get(row.id)
-        if previous is None:
-            continue
-        old_date, old_start = previous
-        if old_date == row.planned_date and old_start == row.planned_start:
-            continue
-        create_calendar_notice(
-            db,
-            employee_id=row.employee_id,
-            title="⚠️ Изменение КИП",
-            description=f"КИП по графику: {old_start or old_date or 'не назначен'} -> {row.planned_start or row.planned_date or 'нет смены'}",
-            source="schedule_recalculate",
-        )
-
-
 def _replace_imported_employee_events(db: Session, prepared: list[tuple[dict[str, Any], Any, str]], imported_kinds: set[str]) -> None:
     employee_ids_by_kind: dict[str, set[int]] = {}
     for _, employee, kind in prepared:
         employee_ids_by_kind.setdefault(kind, set()).add(employee.id)
 
     if "knowledge" in imported_kinds:
-        ids = employee_ids_by_kind.get("knowledge", set())
+        ids = _control_employee_ids(prepared) if CONTROL_EVENT_KINDS.issubset(imported_kinds) else employee_ids_by_kind.get("knowledge", set())
         if ids:
             for existing in db.scalars(select(KnowledgeCheck).where(KnowledgeCheck.employee_id.in_(ids))):
                 db.delete(existing)
     if "medical" in imported_kinds:
-        ids = employee_ids_by_kind.get("medical", set())
+        ids = _control_employee_ids(prepared) if CONTROL_EVENT_KINDS.issubset(imported_kinds) else employee_ids_by_kind.get("medical", set())
         if ids:
             for existing in db.scalars(select(MedicalCheck).where(MedicalCheck.employee_id.in_(ids))):
                 db.delete(existing)
     db.flush()
-
-
-def cleanup_kip_records(db: Session) -> int:
-    deleted = 0
-    employee_ids = [row[0] for row in db.execute(select(KipRecord.employee_id).distinct())]
-    for employee_id in employee_ids:
-        records = db.scalars(
-            select(KipRecord)
-            .where(KipRecord.employee_id == employee_id)
-            .order_by(KipRecord.last_kip_date.desc(), KipRecord.id.desc())
-        ).all()
-        if len(records) <= 1:
-            continue
-        keep = records[0]
-        for record in records[1:]:
-            db.delete(record)
-            deleted += 1
-        upsert_latest_kip_record(
-            db,
-            employee_id=employee_id,
-            last_kip_date=keep.last_kip_date,
-            source=keep.source,
-            raw_value=keep.raw_value,
-        )
-    db.flush()
-    return deleted
 
 
 def cleanup_duplicate_checks(db: Session) -> int:

@@ -5,12 +5,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.auth import COOKIE_NAME
+from app.auth import COOKIE_NAME, csrf_token_for_session, make_session_cookie
 from app.config import get_settings
 from app.database import Base
 from app.main import app
-from app.models import Employee, EventType, KipStatus, KnowledgeCheck, MedicalCheck, NotificationSetting, ShiftType, WorkShift
-from app.routers.admin import LOGIN_ATTEMPTS, MAX_LOGIN_ATTEMPTS, update_medical_check
+from app.models import Employee, EmployeeStatus, EventType, KipStatus, KnowledgeCheck, MedicalCheck, NotificationSetting, ShiftType, WorkShift
+from app.routers.admin import LOGIN_ATTEMPTS, MAX_LOGIN_ATTEMPTS, _access_summary, update_medical_check
 from app.routers.calendar import ICS_HEADERS
 from app.database import get_db
 from app.services.calendar_notices import create_calendar_notice
@@ -114,6 +114,61 @@ def test_admin_login_valid_credentials_clear_previous_failed_attempts() -> None:
     assert LOGIN_ATTEMPTS == {}
 
 
+def test_archive_hides_employee_from_lists_and_restores_only_from_archive(db: Session) -> None:
+    active = Employee(full_name="Активный И.И.", tab_number="201")
+    archived = Employee(full_name="Архивный И.И.", tab_number="202", status=EmployeeStatus.inactive)
+    db.add_all([active, archived])
+    db.flush()
+
+    def override_db():
+        yield db
+
+    session_cookie = make_session_cookie(get_settings().admin_username)
+    client = TestClient(app)
+    client.cookies.set(COOKIE_NAME, session_cookie)
+    app.dependency_overrides[get_db] = override_db
+    try:
+        employees_response = client.get("/admin/employees")
+        archive_response = client.get("/admin/archive")
+
+        assert "Активный И.И." in employees_response.text
+        assert "Архивный И.И." not in employees_response.text
+        assert "Архивный И.И." in archive_response.text
+
+        csrf = csrf_token_for_session(session_cookie)
+        client.post(f"/admin/employees/{active.id}/archive", data={"csrf_token": csrf}, follow_redirects=False)
+        db.refresh(active)
+        assert active.status == EmployeeStatus.inactive
+        assert "Активный И.И." in client.get("/admin/archive").text
+
+        client.post(f"/admin/archive/{active.id}/restore", data={"csrf_token": csrf}, follow_redirects=False)
+        db.refresh(active)
+        assert active.status == EmployeeStatus.active
+        assert "Активный И.И." in client.get("/admin/employees").text
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_access_summary_counts_only_overdue_dates_as_not_admitted(db: Session) -> None:
+    today = date.today()
+    warning = Employee(full_name="Скоро И.И.", tab_number="101")
+    muted = Employee(full_name="Без дат И.И.", tab_number="102")
+    expired = Employee(full_name="Просрочен И.И.", tab_number="103")
+    normal = Employee(full_name="Норма И.И.", tab_number="104")
+    db.add_all([warning, muted, expired, normal])
+    db.flush()
+    db.add(KnowledgeCheck(employee_id=warning.id, check_type="Проверка знаний по ОТ", next_date=today + timedelta(days=3)))
+    db.add(KnowledgeCheck(employee_id=expired.id, check_type="Проверка знаний по ОТ", next_date=today - timedelta(days=1)))
+    db.add(MedicalCheck(employee_id=normal.id, next_date=today + timedelta(days=60)))
+    db.flush()
+
+    summary = _access_summary(db)
+
+    assert summary["active_total"] == 4
+    assert summary["admitted_count"] == 3
+    assert summary["admission_percent"] == 75
+
+
 def test_kip_planned_on_due_date_when_shift_exists(db: Session) -> None:
     worker = employee(db)
     add_shift(db, worker.id, date(2026, 5, 10))
@@ -169,21 +224,23 @@ def test_manual_kip_date_outside_shift_is_forbidden(db: Session) -> None:
 def test_calendar_returns_one_common_ics_with_alarms(db: Session) -> None:
     worker = employee(db)
     add_shift(db, worker.id, date(2026, 5, 10))
-    plan_kip_record(db, employee_id=worker.id, last_kip_date=date(2026, 1, 10), today=date(2026, 1, 11))
-    db.add(NotificationSetting(event_type=EventType.kip, amount=1, unit="days", enabled=True))
+    db.add(MedicalCheck(employee_id=worker.id, previous_date=date(2026, 1, 1), next_date=date(2026, 7, 1)))
+    db.add(NotificationSetting(event_type=EventType.medical_check, amount=1, unit="days", enabled=True))
     db.flush()
 
     content = build_employee_calendar(db, worker).decode("utf-8")
 
     assert "BEGIN:VCALENDAR" in content
     assert "Дневная" in content
-    assert "КИП" in content
+    assert "Медицинская" in content
+    assert "КИП" not in content
     assert "BEGIN:VALARM" in content
-    assert "TRIGGER:-P7D" in content
+    assert "TRIGGER:-P30D" in content
     assert "TRIGGER:-P1D" in content
     assert content.count("BEGIN:VCALENDAR") == 1
     assert "LAST-MODIFIED" in content
     assert "SEQUENCE" in content
+    assert "REFRESH-INTERVAL" in content
 
 
 def test_shift_uid_is_stable_after_schedule_reimport(db: Session) -> None:
@@ -296,6 +353,24 @@ def test_calendar_endpoint_disables_cache(db: Session) -> None:
         assert response.headers[header] == value
 
 
+def test_inactive_employee_calendar_is_not_served(db: Session) -> None:
+    worker = employee(db)
+    worker.calendar_token = "archived-token"
+    worker.status = EmployeeStatus.inactive
+    db.flush()
+
+    def override_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        response = TestClient(app).get("/cal/archived-token.ics")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+
+
 def test_kip_recalculates_after_work_schedule_changes(db: Session) -> None:
     worker = employee(db)
     add_shift(db, worker.id, date(2026, 5, 10))
@@ -314,14 +389,13 @@ def test_kip_recalculates_after_work_schedule_changes(db: Session) -> None:
 def test_admin_calendar_contains_access_events_without_work_shifts(db: Session) -> None:
     worker = employee(db)
     add_shift(db, worker.id, date(2026, 5, 10))
-    plan_kip_record(db, employee_id=worker.id, last_kip_date=date(2026, 1, 10), today=date(2026, 1, 11))
     db.add(KnowledgeCheck(employee_id=worker.id, check_type="Проверка знаний по ОТ", previous_date=date(2026, 1, 1), next_date=date(2026, 6, 1)))
     db.add(MedicalCheck(employee_id=worker.id, previous_date=date(2026, 1, 1), next_date=date(2026, 7, 1)))
     db.flush()
 
     content = build_admin_calendar(db).decode("utf-8")
 
-    assert "КИП" in content
+    assert "КИП" not in content
     assert "Проверка" in content
     assert "Медицинская" in content
     assert "Дневная" not in content

@@ -70,7 +70,7 @@ def test_screen_parser_handles_tab_number_column_shift() -> None:
     assert medical.rows_found == 1
     assert medical.rows[0]["previous_date"].isoformat() == "2025-11-07"
     assert medical.rows[0]["next_date"].isoformat() == "2026-11-07"
-    assert medical.rows[0]["tab_number"] == "1001449"
+    assert medical.rows[0]["tab_number"] == "1449"
     assert knowledge.rows_found == 2
     assert [(row["check_type"], row["previous_date"].isoformat(), row["next_date"].isoformat()) for row in knowledge.rows] == [
         ("Фильтр", "2025-09-09", "2028-09-09"),

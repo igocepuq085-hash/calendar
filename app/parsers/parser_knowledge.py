@@ -1,7 +1,7 @@
 from typing import Any
 
 from app.parsers.base import ParseError, ParseResult, as_date, cell_value_with_merge
-from app.services.people import normalize_name
+from app.services.people import normalize_name, normalize_tab_number
 
 
 CHECK_HEADER_MARKERS = (
@@ -63,7 +63,7 @@ class KnowledgeParser:
                         "kind": self.name,
                         "full_name": normalize_name(full_name),
                         "position": str(ws.cell(row_num, 3).value or ""),
-                        "tab_number": str(ws.cell(row_num, 4).value or "") or None,
+                        "tab_number": normalize_tab_number(ws.cell(row_num, 4).value),
                         "check_type": check_type,
                         "previous_date": as_date(ws.cell(row_num, prev_col).value),
                         "next_date": next_date,

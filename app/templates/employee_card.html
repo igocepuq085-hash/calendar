@@ -5,10 +5,16 @@
     <h1 class="text-2xl font-semibold">{{ employee.full_name }}</h1>
     <p class="text-sm text-slate-500">{{ employee.position or "Должность не указана" }}</p>
   </div>
-  <form method="post" action="/admin/employees/{{ employee.id }}/rotate-token">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <button class="bg-slate-900 text-white rounded px-3 py-2 text-sm">Перевыпустить ссылку</button>
-  </form>
+  <div class="flex gap-2">
+    <form method="post" action="/admin/employees/{{ employee.id }}/rotate-token">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="bg-slate-900 text-white rounded px-3 py-2 text-sm">Перевыпустить ссылку</button>
+    </form>
+    <form method="post" action="/admin/employees/{{ employee.id }}/archive">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="border border-red-200 bg-red-50 text-red-800 rounded px-3 py-2 text-sm">В архив</button>
+    </form>
+  </div>
 </div>
 
 <section class="bg-white border border-slate-200 rounded-lg p-4 mb-4">
@@ -18,7 +24,7 @@
   {% if request.query_params.get("saved") %}
     <div class="mb-3 border border-emerald-200 bg-emerald-50 text-emerald-800 rounded p-2 text-sm">{{ request.query_params.get("saved") }}</div>
   {% endif %}
-  <form method="post" action="/admin/employees/{{ employee.id }}/profile" class="grid md:grid-cols-2 xl:grid-cols-5 gap-3 text-sm items-end">
+  <form method="post" action="/admin/employees/{{ employee.id }}/profile" class="grid md:grid-cols-2 xl:grid-cols-4 gap-3 text-sm items-end">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label>
       <span class="text-slate-500">Табельный номер</span>
@@ -31,13 +37,6 @@
       </select>
     </label>
     <label>
-      <span class="text-slate-500">Статус</span>
-      <select name="status" class="mt-1 w-full border border-slate-300 rounded px-3 py-2">
-        <option value="active" {% if employee.status.value == "active" %}selected{% endif %}>Активный</option>
-        <option value="inactive" {% if employee.status.value == "inactive" %}selected{% endif %}>Неактивный / уволен / переведён</option>
-      </select>
-    </label>
-    <label>
       <span class="text-slate-500">Должность</span>
       <input name="position" value="{{ employee.position or '' }}" class="mt-1 w-full border border-slate-300 rounded px-3 py-2">
     </label>
@@ -45,35 +44,12 @@
   </form>
   <div class="mt-4 text-sm">
     <span class="text-slate-500">Календарь:</span>
-    <code id="cal-link" class="text-xs break-all ml-2">{{ settings.base_url }}/cal/{{ employee.calendar_token }}.ics</code>
+    <code id="cal-link" class="text-xs break-all ml-2">{{ calendar_base_url }}/cal/{{ employee.calendar_token }}.ics</code>
     <button onclick="navigator.clipboard.writeText(document.getElementById('cal-link').innerText)" class="ml-2 border border-slate-300 rounded px-3 py-2 text-sm">Скопировать ссылку</button>
   </div>
 </section>
 
-<div class="grid xl:grid-cols-3 gap-4 mb-4">
-  <section class="bg-white border border-slate-200 rounded-lg p-4">
-    <h2 class="font-semibold mb-3">КИП</h2>
-    {% for row in active_kip %}
-      <div class="border rounded p-3 {{ row.due_date|date_badge_class }}">
-        <p class="text-sm">Последний КИП: <b>{{ row.last_kip_date }}</b></p>
-        <p class="text-sm">Крайний срок: <b>{{ row.due_date }}</b></p>
-        <p class="text-sm">План: <b>{{ row.planned_date or "нет смены" }}</b></p>
-        <p class="text-sm mt-1"><span class="border rounded px-2 py-1 {{ row.status|kip_status_class }}">{{ row.status|kip_status_label }}</span></p>
-        <form method="post" action="/admin/kip/{{ row.id }}/change-date" class="mt-3 flex gap-2 items-end">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <input type="hidden" name="return_to" value="/admin/employees/{{ employee.id }}">
-          <label class="text-xs flex-1">
-            <span>Изменить дату и время КИП</span>
-            <input type="datetime-local" name="planned_start" value="{% if row.planned_start %}{{ row.planned_start.strftime('%Y-%m-%dT%H:%M') }}{% endif %}" class="mt-1 w-full border border-slate-300 rounded px-2 py-1">
-          </label>
-          <button class="border border-slate-300 bg-white rounded px-2 py-1 text-xs">Сохранить</button>
-        </form>
-      </div>
-    {% else %}
-      <p class="text-sm text-slate-500">КИП не импортирован</p>
-    {% endfor %}
-  </section>
-
+<div class="grid xl:grid-cols-2 gap-4 mb-4">
   <section class="bg-white border border-slate-200 rounded-lg p-4">
     <h2 class="font-semibold mb-3">Медкомиссии</h2>
     {% for row in medical_rows %}

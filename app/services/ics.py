@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
-from app.models import CalendarNotice, Employee, EmployeeStatus, EventType, KipStatus, NotificationSetting, ShiftType
+from app.models import CalendarNotice, Employee, EmployeeStatus, EventType, NotificationSetting, ShiftType
 from app.services.calendar_notices import NOTICE_DURATION, calendar_now
 
 try:
@@ -18,15 +18,15 @@ except ImportError:  # pragma: no cover - Railway installs icalendar; fallback k
 SUMMARY = {
     "day_shift": "🟢 Дневная смена",
     "night_shift": "🔵 Ночная смена",
-    "kip": "🟠 КИП",
     "knowledge_check": "🔴 Проверка знаний",
     "medical_check": "🟣 Медицинская комиссия",
     "notice": "⚠️ Изменение даты",
 }
 
 CORE_KNOWLEDGE_MARKERS = ["по от", "по эб", "строп", "кран", "высот"]
-SHORT_EVENT_DURATION = timedelta(hours=1)
 ICS_EVENT_VERSION = 3
+CALENDAR_REFRESH_INTERVAL = "PT15M"
+CALENDAR_REFRESH_DELTA = timedelta(minutes=15)
 
 
 def _uid(prefix: str, item_id: int) -> str:
@@ -64,11 +64,6 @@ def _calendar_datetime(value: datetime | None, fallback_date: date, fallback_tim
 def _shift_start_datetime(shift_date: date, shift_type: ShiftType, start_datetime: datetime | None = None) -> datetime:
     marker_time = time(20, 0) if shift_type == ShiftType.night else time(8, 0)
     return _calendar_datetime(start_datetime, shift_date, marker_time)
-
-
-def _short_marker_times(start: datetime | None, fallback_date: date, fallback_time: time) -> tuple[datetime, datetime]:
-    local_start = _calendar_datetime(start, fallback_date, fallback_time)
-    return local_start, local_start + SHORT_EVENT_DURATION
 
 
 def _as_utc(value: datetime | None) -> datetime:
@@ -110,8 +105,6 @@ def default_alarm_offsets(event_type: EventType, subtype: str | None = None) -> 
     support calendar months in a portable VALARM trigger.
     """
     normalized = (subtype or "").lower()
-    if event_type == EventType.kip:
-        return [timedelta(days=-7), timedelta(days=-1)]
     if event_type == EventType.medical_check:
         return [timedelta(days=-30), timedelta(days=-1)]
     if event_type == EventType.knowledge_check:
@@ -321,7 +314,6 @@ def _load_employee(db: Session, employee: Employee) -> Employee:
         .where(Employee.id == employee.id)
         .options(
             selectinload(Employee.work_shifts),
-            selectinload(Employee.kip_records),
             selectinload(Employee.knowledge_checks),
             selectinload(Employee.medical_checks),
             selectinload(Employee.calendar_notices),
@@ -363,21 +355,6 @@ def _add_employee_events_to_manual_calendar(
                     event_type=event_type,
                     settings=settings,
                     stamp=_event_stamp(shift),
-                )
-            )
-
-    for kip in employee.kip_records:
-        if kip.planned_date and kip.status in {KipStatus.planned, KipStatus.overdue}:
-            start, end = _short_marker_times(kip.planned_start, kip.planned_date, time(9, 0))
-            lines.extend(
-                _manual_event(
-                    uid=_uid("kip", kip.id),
-                    summary=f"{SUMMARY['kip']}{name_suffix}",
-                    start=start,
-                    end=end,
-                    event_type=EventType.kip,
-                    settings=settings,
-                    stamp=_event_stamp(kip),
                 )
             )
 
@@ -448,13 +425,6 @@ def _add_employee_events_to_calendar(
                 _add_alarms(event, EventType.night_shift, settings)
                 calendar.add_component(event)
 
-    for kip in employee.kip_records:
-        if kip.planned_date and kip.status in {KipStatus.planned, KipStatus.overdue}:
-            start, end = _short_marker_times(kip.planned_start, kip.planned_date, time(9, 0))
-            event = _timed_event(f"{SUMMARY['kip']}{name_suffix}", start, end, kip.planned_date, _uid("kip", kip.id), _event_stamp(kip))
-            _add_alarms(event, EventType.kip, settings)
-            calendar.add_component(event)
-
     for check in employee.knowledge_checks:
         event = _all_day_event(f"{SUMMARY['knowledge_check']} - {check.check_type}{name_suffix}", check.next_date, _uid("knowledge", check.id), _event_stamp(check))
         _add_alarms(event, EventType.knowledge_check, settings, check.check_type)
@@ -477,6 +447,8 @@ def _manual_calendar(name: str) -> list[str]:
         "VERSION:2.0",
         "CALSCALE:GREGORIAN",
         f"X-WR-TIMEZONE:{_calendar_tz_name()}",
+        f"REFRESH-INTERVAL;VALUE=DURATION:{CALENDAR_REFRESH_INTERVAL}",
+        f"X-PUBLISHED-TTL:{CALENDAR_REFRESH_INTERVAL}",
         f"X-WR-CALNAME:{_escape(name)}",
     ]
 
@@ -495,6 +467,8 @@ def build_employee_calendar(db: Session, employee: Employee) -> bytes:
     calendar.add("version", "2.0")
     calendar.add("calscale", "GREGORIAN")
     calendar.add("x-wr-timezone", _calendar_tz_name())
+    calendar.add("refresh-interval", CALENDAR_REFRESH_DELTA, parameters={"VALUE": "DURATION"})
+    calendar.add("x-published-ttl", CALENDAR_REFRESH_INTERVAL)
     calendar.add("x-wr-calname", f"Производственный календарь {employee.full_name}")
     _add_employee_events_to_calendar(calendar, employee, settings, include_shifts=True, include_employee_name=False, include_notices=True)
     return calendar.to_ical()
@@ -505,7 +479,6 @@ def build_admin_calendar(db: Session) -> bytes:
         select(Employee)
         .where(Employee.status == EmployeeStatus.active)
         .options(
-            selectinload(Employee.kip_records),
             selectinload(Employee.knowledge_checks),
             selectinload(Employee.medical_checks),
         )
@@ -524,6 +497,8 @@ def build_admin_calendar(db: Session) -> bytes:
     calendar.add("version", "2.0")
     calendar.add("calscale", "GREGORIAN")
     calendar.add("x-wr-timezone", _calendar_tz_name())
+    calendar.add("refresh-interval", CALENDAR_REFRESH_DELTA, parameters={"VALUE": "DURATION"})
+    calendar.add("x-published-ttl", CALENDAR_REFRESH_INTERVAL)
     calendar.add("x-wr-calname", "Производственный календарь администратора")
     for employee in employees:
         _add_employee_events_to_calendar(calendar, employee, settings, include_shifts=False, include_employee_name=True, include_notices=False)

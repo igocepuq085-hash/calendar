@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero-card fade-in">
+  <div>
+    <div class="eyebrow">Неактивные работники</div>
+    <h1>Архив</h1>
+    <p>Архивные работники скрыты из рабочих списков, календарей и общего учета.</p>
+  </div>
+</section>
+
+{% if request.query_params.get("error") %}
+  <div class="mb-4 bg-red-50 border border-red-200 text-red-800 rounded p-3 text-sm">{{ request.query_params.get("error") }}</div>
+{% endif %}
+{% if request.query_params.get("saved") %}
+  <div class="mb-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded p-3 text-sm">{{ request.query_params.get("saved") }}</div>
+{% endif %}
+
+<div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-slate-100 text-slate-600">
+      <tr>
+        <th class="p-3 text-left">Работник</th>
+        <th class="p-3 text-left">Табельный</th>
+        <th class="p-3 text-left">Должность</th>
+        <th class="p-3 text-left">Подразделение</th>
+        <th class="p-3 text-right">Действие</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for employee in employees %}
+      <tr class="border-t border-slate-100">
+        <td class="p-3 font-medium">{{ employee.full_name }}</td>
+        <td class="p-3">{{ employee.tab_number or "нет" }}</td>
+        <td class="p-3">{{ employee.position or "" }}</td>
+        <td class="p-3">{{ employee.department or "СЛХ" }}</td>
+        <td class="p-3 text-right">
+          <form method="post" action="/admin/archive/{{ employee.id }}/restore">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="border border-emerald-200 bg-emerald-50 text-emerald-800 rounded px-3 py-2 text-sm">Вернуть в работу</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="p-3 text-slate-500">Архив пуст</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

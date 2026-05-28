@@ -26,8 +26,6 @@ from app.models import (
     EventType,
     ImportErrorRecord,
     KnowledgeCheck,
-    KipRecord,
-    KipStatus,
     MedicalCheck,
     NotificationSetting,
     UploadedFile,
@@ -35,7 +33,6 @@ from app.models import (
     new_calendar_token,
 )
 from app.services.calendar_notices import create_calendar_notice
-from app.services.kip import KIP_LATE_ERROR, change_kip_date, recalculate_all_kip_records
 from app.services.people import normalize_tab_number
 from app.ui import (
     access_badge_class,
@@ -44,8 +41,6 @@ from app.ui import (
     date_badge_class,
     date_state,
     date_state_label,
-    kip_status_class,
-    kip_status_label,
     state_rank,
     shift_class,
     shift_label,
@@ -57,8 +52,6 @@ templates.env.filters["date_badge_class"] = date_badge_class
 templates.env.filters["date_state_label"] = date_state_label
 templates.env.filters["shift_class"] = shift_class
 templates.env.filters["shift_label"] = shift_label
-templates.env.filters["kip_status_class"] = kip_status_class
-templates.env.filters["kip_status_label"] = kip_status_label
 templates.env.filters["access_card_class"] = access_card_class
 templates.env.filters["access_badge_class"] = access_badge_class
 templates.env.filters["access_state_label"] = access_state_label
@@ -68,10 +61,23 @@ MAX_LOGIN_ATTEMPTS = 5
 LOGIN_WINDOW_SECONDS = 5 * 60
 
 
+def _calendar_base_url(request: Request) -> str:
+    configured = get_settings().base_url.rstrip("/")
+    if not configured.startswith(("http://localhost", "http://127.0.0.1")):
+        return configured
+    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    if forwarded_host and not forwarded_host.startswith(("localhost", "127.0.0.1")):
+        forwarded_proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+        return f"{forwarded_proto}://{forwarded_host}".rstrip("/")
+    return configured
+
+
 def render(request: Request, template: str, context: dict, status_code: int = 200) -> HTMLResponse:
+    calendar_base_url = _calendar_base_url(request)
     context.setdefault("request", request)
     context.setdefault("settings", get_settings())
-    context.setdefault("admin_calendar_url", f"{get_settings().base_url}/cal/admin/{get_admin_calendar_token()}.ics")
+    context.setdefault("calendar_base_url", calendar_base_url)
+    context.setdefault("admin_calendar_url", f"{calendar_base_url}/cal/admin/{get_admin_calendar_token()}.ics")
     context.setdefault("csrf_token", csrf_token_for_session(request.cookies.get(COOKIE_NAME)))
     return templates.TemplateResponse(request, template, context, status_code=status_code)
 
@@ -147,12 +153,6 @@ def _parse_date(value: str | None) -> date | None:
     return date.fromisoformat(value)
 
 
-def _parse_datetime(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    return datetime.fromisoformat(value)
-
-
 def _control_events(db: Session, start: date, end: date, limit: int = 100) -> list[dict]:
     events: list[dict] = []
     knowledge = db.scalars(
@@ -209,16 +209,6 @@ def _control_events_count(db: Session, start: date, end: date) -> int:
     return knowledge_count + medical_count
 
 
-def _schedule_until_by_employee(db: Session) -> dict[int, date]:
-    return {
-        employee_id: max_date
-        for employee_id, max_date in db.execute(
-            select(WorkShift.employee_id, func.max(WorkShift.shift_date)).group_by(WorkShift.employee_id)
-        )
-        if max_date is not None
-    }
-
-
 def _employee_access_cards(db: Session, employees: list[Employee]) -> list[dict]:
     employee_ids = [employee.id for employee in employees]
     alerts: dict[int, list[dict]] = {employee.id: [] for employee in employees}
@@ -231,13 +221,6 @@ def _employee_access_cards(db: Session, employees: list[Employee]) -> list[dict]
     for row in db.scalars(select(MedicalCheck).where(MedicalCheck.employee_id.in_(employee_ids))):
         state = date_state(row.next_date)
         alerts[row.employee_id].append({"state": state, "date": row.next_date, "title": "Медицинская комиссия"})
-    for row in db.scalars(select(KipRecord).where(KipRecord.employee_id.in_(employee_ids))):
-        state = date_state(row.due_date)
-        title = "КИП"
-        if row.status == KipStatus.overdue:
-            state = "danger"
-        alerts[row.employee_id].append({"state": state, "date": row.due_date, "title": title})
-
     cards: list[dict] = []
     for employee in employees:
         if employee.status == EmployeeStatus.inactive:
@@ -270,7 +253,7 @@ def _access_summary(db: Session) -> dict:
     active_employees = db.scalars(select(Employee).where(Employee.status == EmployeeStatus.active)).all()
     cards = _employee_access_cards(db, active_employees)
     active_total = len(active_employees)
-    admitted_count = sum(1 for card in cards if card["state"] in {"success", "warning"})
+    admitted_count = sum(1 for card in cards if card["state"] != "danger")
     admission_percent = round((admitted_count / active_total) * 100) if active_total else 100
     return {
         "active_total": active_total,
@@ -332,18 +315,6 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     next_14 = today + timedelta(days=14)
     control_month = _control_events(db, month_start, month_end, limit=120)
     control_week = _control_events(db, today, next_7, limit=80)
-    kip_soon_count = db.scalar(
-        select(func.count())
-        .select_from(KipRecord)
-        .join(KipRecord.employee)
-        .where(KipRecord.due_date.between(today, next_14), Employee.status == EmployeeStatus.active)
-    ) or 0
-    kip_overdue_count = db.scalar(
-        select(func.count())
-        .select_from(KipRecord)
-        .join(KipRecord.employee)
-        .where(KipRecord.status == KipStatus.overdue, Employee.status == EmployeeStatus.active)
-    ) or 0
     knowledge_month_count = db.scalar(
         select(func.count())
         .select_from(KnowledgeCheck)
@@ -356,35 +327,12 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
         .join(MedicalCheck.employee)
         .where(MedicalCheck.next_date.between(today, next_14), Employee.status == EmployeeStatus.active)
     ) or 0
-    schedule_until = _schedule_until_by_employee(db)
-    kip_conflicts = db.scalars(
-        select(KipRecord)
-        .join(KipRecord.employee)
-        .options(selectinload(KipRecord.employee))
-        .where(KipRecord.status == KipStatus.conflict, Employee.status == EmployeeStatus.active)
-        .order_by(KipRecord.due_date, Employee.full_name)
-        .limit(100)
-    ).all()
-    real_kip_conflicts = sorted(
-        [row for row in kip_conflicts if schedule_until.get(row.employee_id) and schedule_until[row.employee_id] >= row.due_date],
-        key=lambda row: (row.due_date, row.employee.full_name),
-    )
-    waiting_kip_schedule = sorted(
-        [row for row in kip_conflicts if not schedule_until.get(row.employee_id) or schedule_until[row.employee_id] < row.due_date],
-        key=lambda row: (row.due_date, row.employee.full_name),
-    )
     context = {
         "access_summary": _access_summary(db),
-        "kip_soon_count": kip_soon_count,
-        "kip_overdue_count": kip_overdue_count,
         "knowledge_month_count": knowledge_month_count,
         "medical_soon_count": medical_soon_count,
         "control_week_count": _control_events_count(db, today, next_7),
         "control_month_count": _control_events_count(db, month_start, month_end),
-        "kip_soon": db.scalars(select(KipRecord).join(KipRecord.employee).options(selectinload(KipRecord.employee)).where(KipRecord.due_date.between(today, next_14), Employee.status == EmployeeStatus.active).order_by(KipRecord.due_date, Employee.full_name).limit(20)).all(),
-        "kip_overdue": db.scalars(select(KipRecord).join(KipRecord.employee).options(selectinload(KipRecord.employee)).where(KipRecord.status == KipStatus.overdue, Employee.status == EmployeeStatus.active).order_by(KipRecord.due_date, Employee.full_name).limit(20)).all(),
-        "kip_conflicts": real_kip_conflicts[:20],
-        "waiting_kip_schedule": waiting_kip_schedule[:20],
         "knowledge_month": db.scalars(select(KnowledgeCheck).join(KnowledgeCheck.employee).options(selectinload(KnowledgeCheck.employee)).where(KnowledgeCheck.next_date.between(month_start, month_end), Employee.status == EmployeeStatus.active).order_by(KnowledgeCheck.next_date).limit(80)).all(),
         "knowledge_week": db.scalars(select(KnowledgeCheck).join(KnowledgeCheck.employee).options(selectinload(KnowledgeCheck.employee)).where(KnowledgeCheck.next_date.between(today, next_7), Employee.status == EmployeeStatus.active).order_by(KnowledgeCheck.next_date).limit(40)).all(),
         "control_month": control_month,
@@ -401,9 +349,15 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
 
 @router.get("/employees", response_class=HTMLResponse, dependencies=[Depends(admin_dependency)])
 def employees(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
-    items = db.scalars(select(Employee).order_by(Employee.full_name)).all()
+    items = db.scalars(select(Employee).where(Employee.status == EmployeeStatus.active).order_by(Employee.full_name)).all()
     cards = _employee_access_cards(db, items)
     return render(request, "employees.html", {"cards": cards})
+
+
+@router.get("/archive", response_class=HTMLResponse, dependencies=[Depends(admin_dependency)])
+def employee_archive(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    items = db.scalars(select(Employee).where(Employee.status == EmployeeStatus.inactive).order_by(Employee.full_name)).all()
+    return render(request, "archive.html", {"employees": items})
 
 
 @router.get("/employees/{employee_id}", response_class=HTMLResponse, dependencies=[Depends(admin_dependency)])
@@ -413,20 +367,18 @@ def employee_card(employee_id: int, request: Request, db: Session = Depends(get_
         .where(Employee.id == employee_id)
         .options(
             selectinload(Employee.work_shifts),
-            selectinload(Employee.kip_records),
             selectinload(Employee.knowledge_checks),
             selectinload(Employee.medical_checks),
         )
     )
     if employee is None:
         raise HTTPException(status_code=404)
+    if employee.status == EmployeeStatus.inactive:
+        return RedirectResponse("/admin/archive", status_code=303)
     events = []
     for shift in employee.work_shifts:
         if shift.shift_date >= date.today():
             events.append((shift.shift_date, f"Смена: {shift.shift_type.value}"))
-    for kip in employee.kip_records:
-        if kip.planned_date and kip.planned_date >= date.today():
-            events.append((kip.planned_date, f"КИП: {kip.status.value}"))
     for check in employee.knowledge_checks:
         if check.next_date >= date.today():
             events.append((check.next_date, f"Проверка знаний: {check.check_type}"))
@@ -435,7 +387,6 @@ def employee_card(employee_id: int, request: Request, db: Session = Depends(get_
             events.append((check.next_date, "Медицинская комиссия"))
     events.sort(key=lambda item: item[0])
     future_shifts = sorted([s for s in employee.work_shifts if s.shift_date >= date.today()], key=lambda s: s.shift_date)[:21]
-    active_kip = sorted(employee.kip_records, key=lambda k: (k.due_date, k.id))[-1:] if employee.kip_records else []
     knowledge_rows = sorted(employee.knowledge_checks, key=lambda k: (k.next_date, k.check_type))
     medical_rows = sorted(employee.medical_checks, key=lambda m: m.next_date)
     return render(
@@ -445,7 +396,6 @@ def employee_card(employee_id: int, request: Request, db: Session = Depends(get_
             "employee": employee,
             "events": events[:50],
             "future_shifts": future_shifts,
-            "active_kip": active_kip,
             "knowledge_rows": knowledge_rows,
             "medical_rows": medical_rows,
         },
@@ -457,13 +407,14 @@ def update_employee_profile(
     employee_id: int,
     tab_number: str = Form(""),
     department: str = Form("СЛХ"),
-    status: EmployeeStatus = Form(...),
     position: str = Form(""),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     employee = db.get(Employee, employee_id)
     if employee is None:
         raise HTTPException(status_code=404)
+    if employee.status == EmployeeStatus.inactive:
+        return RedirectResponse("/admin/archive?error=Работник находится в архиве", status_code=303)
     normalized_tab = normalize_tab_number(tab_number)
     if normalized_tab:
         existing = db.scalar(select(Employee).where(Employee.tab_number == normalized_tab, Employee.id != employee.id))
@@ -472,20 +423,41 @@ def update_employee_profile(
                 f"/admin/employees/{employee_id}?error=Табельный номер уже назначен работнику {existing.full_name}",
                 status_code=303,
             )
-    old = f"{employee.department or ''}; {employee.status.value}; {employee.position or ''}"
+    old = f"{employee.department or ''}; {employee.position or ''}; {employee.tab_number or ''}"
     employee.tab_number = normalized_tab
     employee.department = department or "СЛХ"
-    employee.status = status
     employee.position = position or employee.position
     _audit(
         db,
         "employee_profile_updated",
         "employees",
         employee.id,
-        f"Карточка работника изменена: {old} -> {employee.department}; {employee.status.value}; {employee.position or ''}",
+        f"Карточка работника изменена: {old} -> {employee.department}; {employee.position or ''}; {employee.tab_number or ''}",
     )
     db.commit()
     return RedirectResponse(f"/admin/employees/{employee_id}", status_code=303)
+
+
+@router.post("/employees/{employee_id}/archive", dependencies=[Depends(csrf_dependency)])
+def archive_employee(employee_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    employee = db.get(Employee, employee_id)
+    if employee is None:
+        raise HTTPException(status_code=404)
+    employee.status = EmployeeStatus.inactive
+    _audit(db, "employee_archived", "employees", employee.id, f"Работник перенесен в архив: {employee.full_name}")
+    db.commit()
+    return RedirectResponse("/admin/employees", status_code=303)
+
+
+@router.post("/archive/{employee_id}/restore", dependencies=[Depends(csrf_dependency)])
+def restore_employee(employee_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    employee = db.get(Employee, employee_id)
+    if employee is None:
+        raise HTTPException(status_code=404)
+    employee.status = EmployeeStatus.active
+    _audit(db, "employee_restored", "employees", employee.id, f"Работник восстановлен из архива: {employee.full_name}")
+    db.commit()
+    return RedirectResponse("/admin/archive?saved=Работник восстановлен", status_code=303)
 
 
 @router.post("/employees/{employee_id}/rotate-token", dependencies=[Depends(csrf_dependency)])
@@ -493,6 +465,8 @@ def rotate_token(employee_id: int, db: Session = Depends(get_db)) -> RedirectRes
     employee = db.get(Employee, employee_id)
     if employee is None:
         raise HTTPException(status_code=404)
+    if employee.status == EmployeeStatus.inactive:
+        return RedirectResponse("/admin/archive?error=Работник находится в архиве", status_code=303)
     employee.calendar_token = new_calendar_token()
     db.commit()
     return RedirectResponse(f"/admin/employees/{employee_id}", status_code=303)
@@ -553,8 +527,9 @@ def work_shifts(request: Request, db: Session = Depends(get_db)) -> HTMLResponse
     next_year, next_month = (year + 1, 1) if month == 12 else (year, month + 1)
     shifts = db.scalars(
         select(WorkShift)
+        .join(WorkShift.employee)
         .options(selectinload(WorkShift.employee))
-        .where(WorkShift.shift_date.between(start, end))
+        .where(WorkShift.shift_date.between(start, end), Employee.status == EmployeeStatus.active)
         .order_by(WorkShift.employee_id, WorkShift.shift_date)
     ).all()
     grouped = {}
@@ -577,50 +552,6 @@ def work_shifts(request: Request, db: Session = Depends(get_db)) -> HTMLResponse
     )
 
 
-@router.get("/kip", response_class=HTMLResponse, dependencies=[Depends(admin_dependency)])
-def kip_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
-    rows = db.scalars(select(KipRecord).options(selectinload(KipRecord.employee)).order_by(KipRecord.due_date, KipRecord.id).limit(100)).all()
-    schedule_until = _schedule_until_by_employee(db)
-    for row in rows:
-        row.schedule_until = schedule_until.get(row.employee_id)
-    return render(request, "kip.html", {"records": rows, "error_text": KIP_LATE_ERROR})
-
-
-@router.post("/kip/recalculate", dependencies=[Depends(csrf_dependency)])
-def kip_recalculate(db: Session = Depends(get_db)) -> RedirectResponse:
-    recalculate_all_kip_records(db)
-    db.commit()
-    return RedirectResponse("/admin/kip", status_code=303)
-
-
-@router.post("/kip/{kip_id}/change-date", dependencies=[Depends(csrf_dependency)])
-def kip_change_date(
-    kip_id: int,
-    planned_start: datetime = Form(...),
-    return_to: str = Form("/admin/kip"),
-    db: Session = Depends(get_db),
-) -> RedirectResponse:
-    record = db.get(KipRecord, kip_id)
-    if record is None:
-        raise HTTPException(status_code=404)
-    old_date = record.planned_date
-    old_start = record.planned_start
-    try:
-        change_kip_date(db, record, planned_start)
-    except ValueError as exc:
-        return _redirect_with_error(return_to, "/admin/kip", str(exc))
-    if old_date != record.planned_date or old_start != record.planned_start:
-        create_calendar_notice(
-            db,
-            employee_id=record.employee_id,
-            title="⚠️ Изменение КИП",
-            description=f"КИП перенесен: {old_start or old_date or 'не назначен'} -> {record.planned_start or record.planned_date}",
-            source="manual_kip",
-        )
-    db.commit()
-    return _redirect_with_success(return_to, "/admin/kip")
-
-
 @router.post("/knowledge/{check_id}/update", dependencies=[Depends(csrf_dependency)])
 def update_knowledge_check(
     check_id: int,
@@ -632,6 +563,8 @@ def update_knowledge_check(
     check = db.get(KnowledgeCheck, check_id)
     if check is None:
         raise HTTPException(status_code=404)
+    if check.employee and check.employee.status == EmployeeStatus.inactive:
+        return _redirect_with_error(return_to, "/admin/knowledge", "Работник находится в архиве")
     old_previous = check.previous_date
     old_next = check.next_date
     new_previous = _parse_date(previous_date)
@@ -664,6 +597,8 @@ def update_medical_check(
     check = db.get(MedicalCheck, check_id)
     if check is None:
         raise HTTPException(status_code=404)
+    if check.employee and check.employee.status == EmployeeStatus.inactive:
+        return _redirect_with_error(return_to, "/admin/medical", "Работник находится в архиве")
     old_previous = check.previous_date
     old_next = check.next_date
     new_previous = _parse_date(previous_date)
@@ -689,7 +624,9 @@ def update_medical_check(
 def knowledge(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     rows = db.scalars(
         select(KnowledgeCheck)
+        .join(KnowledgeCheck.employee)
         .options(selectinload(KnowledgeCheck.employee))
+        .where(Employee.status == EmployeeStatus.active)
         .order_by(KnowledgeCheck.next_date, KnowledgeCheck.id)
         .limit(300)
     ).all()
@@ -700,7 +637,9 @@ def knowledge(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
 def medical(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     rows = db.scalars(
         select(MedicalCheck)
+        .join(MedicalCheck.employee)
         .options(selectinload(MedicalCheck.employee))
+        .where(Employee.status == EmployeeStatus.active)
         .order_by(MedicalCheck.next_date, MedicalCheck.id)
         .limit(300)
     ).all()
@@ -709,8 +648,12 @@ def medical(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
 
 @router.get("/notifications", response_class=HTMLResponse, dependencies=[Depends(admin_dependency)])
 def notifications(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
-    settings = db.scalars(select(NotificationSetting).order_by(NotificationSetting.event_type)).all()
-    event_types = [event_type for event_type in EventType if event_type != EventType.instructor_trip]
+    event_types = [event_type for event_type in EventType if event_type not in {EventType.kip, EventType.instructor_trip}]
+    settings = db.scalars(
+        select(NotificationSetting)
+        .where(NotificationSetting.event_type.in_(event_types))
+        .order_by(NotificationSetting.event_type)
+    ).all()
     return render(request, "notifications.html", {"settings_rows": settings, "event_types": event_types})
 
 
